@@ -1,0 +1,9 @@
+{:nrepl {:port 8777}
+ :deps {:aliases [:cljs]}
+ :builds
+ {:client
+  {:target     :browser
+   :output-dir "out"
+   :modules
+   {:client
+    {:init-fn step-up.alpha.user/main}}}}}
