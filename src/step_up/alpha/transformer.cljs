@@ -116,68 +116,21 @@
   (z 1 2)
   (apply z 1 (range 25))
 
-  ;; add ;tf, :in (which is :args), :out,
-  ;; (defn tform [env & args]
-  ;;   (->> env :tf (reduce (fn [arg tf] (map tf arg))
-  ;;                  args)))
-
-  ;; (take 3 (tform x 1 2 3 4))
-
-  ; transformer fnt step-up dtf form tran
-  ; (tfn + :in #() :out #())
-  ; (tfn + :in #() :out #())
-  ; tfmr ; tfn ; hash-map ;
-
-  transformer ;=> #object [step-up$alpha$pthm$tf]
-  (transformer) ;=> {:args [], :invoke-any #object [G__57451], :step-up.alpha.pthm/tform-end #object [step-up$alpha$pthm$endform], :step-up.alpha.pthm/ins ...
-  (def a+ (assoc transformer :op +)) ;=> #'step-up.alpha.pthm/a+
+  transformer
+  (transformer)
+  (def a+ (assoc transformer :op +))
   (apply a+ 1 2 [3 4]) ;=> 10
-
-  (def b+ (assoc transformer :op +)) ;=> #'step-up.alpha.pthm/a+
-  (apply b+ 1 2 [3 4]) ;=> 10
 
   (def x+ (assoc transformer :op + :x 1 :y 2))
 
   x+
   (type x+)
-  (x+)
-  (x+ 1)
-  (x+ 1 2)
-  (apply x+ 1 2 (range 23))
-  (apply x+ 1 2 (range 2))
-  (apply x+ [2 1 4])
-  (apply {} [2 1 3])
-
-
-  ;; (def m (.-EMPTY PersistentTransformerHashMap))
-
-  ;; m
-  ;; (type m)
-
-  (def a1 (assoc transformer :a 1))
-  a1
-  (type a1)
-  (a1 1 2 3 4 5)
-
-  (def b1 (assoc a1 :hello :world))
-  (type b1)
-  b1
-  (apply b1 [1 2 3 4])
-  (b1 [1 2 3 4])
-  (apply b1 (range 24))
-  (apply b1 (range 21))
-  (b1 1 2)
-  (b1 1)
-
-  (def c1 (assoc b1 :good :stuff))
-  c1
-  (type c1)
-
-  (c1 :hello) ;=> :hello
-  (:hello c1) ;=> :world
-  (c1 :hello :big :blue :world)
-
-
+  (x+) ;=> 0
+  (x+ 1) ;=> 1
+  (x+ 1 2) ;=> 3
+  (apply x+ 1 2 (range 23)) ;=> 256
+  (apply x+ 1 2 (range 2)) ;=> 4
+  (apply x+ [2 1 4]) ;=> 7
 
   (defn failure-message [data input output actual]
     (str "Failure in "   (last (:id data))

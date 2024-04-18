@@ -53,7 +53,7 @@
                              (mapv vec)
                              (into {})
                              (#(dissoc % :tf-pre))
-                             (merge dm/empty-transformer-map)
+                             (merge dm/empty-dyna-map)
                              (#(set-methods % meths)))]
         (or pre-env env)))))
 
@@ -109,42 +109,6 @@
 
   (def r1 (-> root (assoc :op +)))
   r1
-  (get-methods r1)
-  (type r1)
-  (r1 1 2 3 4)
-  (r1 1 2 3)
-  (r1 1 2)
-  (r1 1)
-  (r1 1 2 3 [4 5])
-  (apply r1 1 2 3 [4 5])
-  (apply r1 1 2 3 (range 35))
-
-
-  :end)
-#_
-(comment
-
-  (def a (dyna-map :a 1))
-  a
-  (type a)
-  (def b (assoc a :x 1))
-  b
-  (type b)
-
-  ;; (def root (dyna-map))
-  root
-  (type root)
-  (root)
-  (root :args)
-  (root 1)
-  (root 1 2)
-  (root 1 2 3)
-  (apply root 1 [2])
-
-  (apply root 3 [1 2 3])
-
-  (def r1 (-> root (assoc :op +)))
-  r1
   (type r1)
   (r1 1 2 3 4)
   (r1 1 2 3)
@@ -158,17 +122,6 @@
   (time (apply + 1 2 3 (range 100000))) ;=> 4999950006
   ; "Elapsed time: 13.000000 msecs"
 
-  ;; (defn a+ [& args] (println :args args) (apply + args))
-  (def tm (dyna-map :op + :a 1 :b 2))
-  (def tm (dyna-map :a 1 :b 2))
-  tm
-  (type tm)
-  (tm 1)
-  (tm 1 2 3)
-  (tm 1 [2 3])
-  (apply tm 1 [2 3])
-  (apply tm 1 (range 25))
-
   (def x
     (assoc root
            :op +
@@ -179,92 +132,40 @@
            :out    [::out    (fn [x] (println :out    x) x)]
            :tf-end [::tf-end (fn [x] (println :tf-end x) x)]))
 
-  ;;  (fn [x] (println :tf 2 :x x) x)))
-  ; constructor ; tran-map ; tdmr-map ; tform
-  ; finally
-  (:invoke-any x)
-  (x :IFn/-invoke-any)
-  (type x)
   x
-  (x)
-  (apply x [1])
-  (apply x 1 [2])
-  (x 1 2 4)
-  (apply x 1 2 3 (range 25))
-  (apply x 1 (range 5))
+  (type x)
+  (x) ;=> 0
+  (apply x [1]) ;=> 1
+  (apply x 1 [2]) ;=> 3
+  (x 1 2 4) ;=> 7
+  (apply x 1 2 3 (range 25)) ;=> 306
+  (apply x 1 (range 5)) ;=> 11
 
   (def y (assoc x :a 1 :b 2))
   y
-  (y 1 2)
+  (y 1 2) ;=> 3
 
-  (apply y 1 (range 5))
+  (apply y 1 (range 5)) ;=> 11
 
   (def z (assoc y :r 1 :k 2))
   z
-  (z 1 2)
-  (apply z 1 (range 25))
+  (z 1 2) ;=> 3
+  (apply z 1 (range 25)) ;=> 301
 
-  ;; add ;tf, :in (which is :args), :out,
-  ;; (defn tform [env & args]
-  ;;   (->> env :tf (reduce (fn [arg tf] (map tf arg))
-  ;;                  args)))
-
-  ;; (take 3 (tform x 1 2 3 4))
-
-  ; transformer fnt step-up dtf form tran
-  ; (tfn + :in #() :out #())
-  ; (tfn + :in #() :out #())
-  ; tfmr ; tfn ; hash-map ;
-
-  dyna-map ;=> #object [step-up$alpha$pthm$tf]
-  (dyna-map) ;=> {:args [], :invoke-any #object [G__57451], :step-up.alpha.pthm/tform-end #object [step-up$alpha$pthm$endform], :step-up.alpha.pthm/ins ...
-  (def a+ (dyna-map :op +)) ;=> #'step-up.alpha.pthm/a+
+  root
+  (root) ;=> nil
+  (def a+ (assoc root :op +)) ;=> #'step-up.alpha.pthm/a+
   (apply a+ 1 2 [3 4]) ;=> 10
 
-  (def b+ (dyna-map :op +)) ;=> #'step-up.alpha.pthm/a+
-  (apply b+ 1 2 [3 4]) ;=> 10
-
-  (def x+ (dyna-map :op + :x 1 :y 2))
+  (def x+ (assoc a+ :x 1 :y 2))
 
   x+
   (type x+)
-  (x+)
-  (x+ 1)
-  (x+ 1 2)
-  (apply x+ 1 2 (range 23))
-  (apply x+ 1 2 (range 2))
-  (apply x+ [2 1])
-  (apply {} [2 1])
-
-
-  ;; (def m (.-EMPTY PersistentDynamicMap))
-
-  ;; m
-  ;; (type m)
-
-  (def a1 (assoc empty-transformer-map :a 1))
-  a1
-  (type a1)
-  (a1 1 2 3 4 5)
-
-  (def b1 (assoc a1 :hello :world))
-  (type b1)
-  b1
-  (apply b1 [1 2 3 4])
-  (b1 [1 2 3 4])
-  (apply b1 (range 24))
-  (apply b1 (range 21))
-  (b1 1 2)
-  (b1 1)
-
-  (def c1 (assoc b1 :good :stuff))
-  c1
-  (type c1)
-
-  (c1 :hello) ;=> :hello
-  (:hello c1) ;=> :world
-  (c1 :hello :big :blue :world)
+  (x+) ;=> 0
+  (x+ 1) ;=> 1
+  (x+ 1 2) ;=> 3
+  (apply x+ 1 2 (range 23)) ;=> 256
+  (apply x+ 1 2 (range 2)) ;=> 4
+  (apply x+ [2 1]) ;=> 3
 
   :end)
-  
-  
