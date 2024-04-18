@@ -1,4 +1,4 @@
-(ns step-up.alpha.trans-map)
+(ns step-up.alpha.dyna-map)
 
 (defn identities [& args]
   (case (count args)
@@ -10,27 +10,27 @@
   (let [[_this & args] args]
     (apply identities args)))
 
-(declare PersistentFlexMap TransientFlexMap)
+(declare PersistentDynamicMap TransientDynamicMap)
 
-(defn flex-invoke
+(defn dyna-invoke
   [env & args]
-  (if-let [diy-transformer-transformer (::flex-invoke (:m env))]
+  (if-let [diy-transformer-transformer (::dyna-invoke (:m env))]
     (apply diy-transformer-transformer env args)
     (throw (js/Error. "No default transformer transformer added"))))
 
 (defn handle-invoke [m & args]
   ;; (println :handle-invoke :m m)
-  (let [the-default-invoke (get-in m [:m ::flex-invoke])]
+  (let [the-default-invoke (get-in m [:m ::dyna-invoke])]
 
     ;; (println :the-default-invoke the-default-invoke)
     (if the-default-invoke
       (the-default-invoke m args)
-      (apply flex-invoke m args))))
+      (apply dyna-invoke m args))))
 
 (declare get-methods)
 
 (defn PTHM [facaded-coll methods]
-  (let [pthm (PersistentFlexMap. facaded-coll methods)
+  (let [pthm (PersistentDynamicMap. facaded-coll methods)
         tform-pre (::tform-pre pthm identity)
         new-pthm (or (tform-pre pthm) pthm)]
     (set! (.-cljs$lang$applyTo new-pthm)
@@ -39,7 +39,7 @@
     new-pthm))
 
 (defn TTHM [facaded-coll methods edit]
-  (let [tthm (TransientFlexMap. facaded-coll methods edit)
+  (let [tthm (TransientDynamicMap. facaded-coll methods edit)
         tform-pre (::Transient.tform-pre tthm identity)
         new-tthm (or (tform-pre tthm) tthm)]
     (set! (.-cljs$lang$applyTo new-tthm)
@@ -47,7 +47,7 @@
             (apply handle-invoke (merge facaded-coll new-tthm) args)))
     new-tthm))
 
-(defprotocol IFlexAssociative
+(defprotocol IDynamicAssociative
   (-assoc-method [coll k v])
   (-contains-method? [coll k])
   (-method [coll k])
@@ -84,17 +84,17 @@
                            (-assoc-method c k v))
                          coll))
         fcoll (get-coll res)
-        new-flex (PTHM fcoll res)]
-    (set! (.-cljs$lang$applyTo new-flex)
+        new-dyna (PTHM fcoll res)]
+    (set! (.-cljs$lang$applyTo new-dyna)
           (fn [& args]
-            (apply handle-invoke new-flex args)))
+            (apply handle-invoke new-dyna args)))
     res))
 
 (def PTHM-fields
-  #{::flex-invoke
+  #{::dyna-invoke
     :Object/pr-str* :Object/-equiv :Object/es6-iterator-keys :Object/es6-entries-iterator
     :Object/es6-iterator-values :Object/contains? :Object/-lookup :Object/forEach
-    :ICloneable/PersistentFlexMap :IIterable/-iterator :IWithMeta/-with-meta
+    :ICloneable/PersistentDynamicMap :IIterable/-iterator :IWithMeta/-with-meta
     :IMeta/-meta :ICollection/-conj :IEmptyableCollection/-empty :IEquiv/-equiv
     :IHash/-hash :ISeqable/-seq :ICounted/-count :ILookup/-lookup2 :ILookup/-lookup3
     :IAssociative/-assoc :IAssociative/-contains-key? :IFind/-find :IMap/-dissoc
@@ -115,7 +115,7 @@
     :Transient.IFn/-invoke20 :Transient.IFn/-invoke-rest-args
     :Transient.IFn/-invoke-any :Transient.IAssociative/-assoc})
 
-(deftype PersistentFlexMap [fcoll m]
+(deftype PersistentDynamicMap [fcoll m]
   Object
   (toString [_coll]
     (if-let [f-pr-str* (:Object/pr-str* m)]
@@ -189,7 +189,7 @@
   (-empty [_coll]
     (if-let [f-empty (:IEmptyableCollection/-empty m)]
       (f-empty {:fcoll fcoll :m m})
-      (with-meta (.-EMPTY PersistentFlexMap) (meta fcoll))))
+      (with-meta (.-EMPTY PersistentDynamicMap) (meta fcoll))))
 
   IEquiv
   (-equiv [_coll other]
@@ -226,7 +226,7 @@
       (f-lookup {:fcoll fcoll :m m :k k :not-found not-found})
       (-lookup fcoll k not-found)))
 
-  IFlexAssociative
+  IDynamicAssociative
   (-assoc-method [_coll k v]
     (PTHM fcoll (assoc m k v)))
   (-contains-method? [_coll k]
@@ -246,7 +246,7 @@
   (-assoc [_coll k v]
     (if-let [f-assoc (:IAssociative/-assoc m)]
       (f-assoc {:fcoll fcoll :m m :k k :v v})
-      (let [field? (or (PTHM-fields k) (TTHM-fields k) (= ::flex-invoke k))]
+      (let [field? (or (PTHM-fields k) (TTHM-fields k) (= ::dyna-invoke k))]
         (if false #_field?
             (PTHM fcoll (assoc m k v))
             (PTHM (assoc fcoll k v) m)))))
@@ -371,20 +371,20 @@
       (TTHM (transient fcoll) (transient m) true))))
 
 (extend-protocol IPrintWithWriter
-  PersistentFlexMap
+  PersistentDynamicMap
   (-pr-writer [coll writer opts]
     (print-map coll cljs.core/pr-writer writer opts)))
 
-(set! (.-EMPTY PersistentFlexMap)
+(set! (.-EMPTY PersistentDynamicMap)
       (let [pthm (PTHM {} {})]
         (set! (.-cljs$lang$applyTo pthm) ids)
         pthm))
 
-(set! (.-fromArray PersistentFlexMap)
+(set! (.-fromArray PersistentDynamicMap)
       (fn [arr ^boolean no-clone]
         (let [arr (if no-clone arr (aclone arr))
               len (alength arr)
-              pthm (loop [i 0 ret (transient (.-EMPTY PersistentFlexMap))]
+              pthm (loop [i 0 ret (transient (.-EMPTY PersistentDynamicMap))]
                      (if (< i len)
                        (recur (+ i 2)
                               (-assoc! ret (aget arr i) (aget arr (inc i))))
@@ -392,10 +392,10 @@
           (set! (.-cljs$lang$applyTo pthm) ids)
           pthm)))
 
-(set! (.-fromArrays PersistentFlexMap)
+(set! (.-fromArrays PersistentDynamicMap)
       (fn [ks vs]
         (let [len (alength ks)
-              pthm (loop [i 0 ^not-native out (transient (.-EMPTY PersistentFlexMap))]
+              pthm (loop [i 0 ^not-native out (transient (.-EMPTY PersistentDynamicMap))]
                      (if (< i len)
                        (if (<= (alength vs) i)
                          (throw (js/Error. (str "No value supplied for key: " (aget ks i))))
@@ -404,10 +404,10 @@
           (set! (.-cljs$lang$applyTo pthm) ids)
           pthm)))
 
-(set! (.-createWithCheck PersistentFlexMap)
+(set! (.-createWithCheck PersistentDynamicMap)
       (fn [arr]
         (let [len (alength arr)
-              ret (transient (.-EMPTY PersistentFlexMap))
+              ret (transient (.-EMPTY PersistentDynamicMap))
               pthm (do (loop [i 0]
                          (when (< i len)
                            (-assoc! ret (aget arr i) (aget arr (inc i)))
@@ -418,9 +418,9 @@
           (set! (.-cljs$lang$applyTo pthm) ids)
           pthm)))
 
-(es6-iterable PersistentFlexMap)
+(es6-iterable PersistentDynamicMap)
 
-(deftype TransientFlexMap [ftcoll m ^:mutable ^boolean edit]
+(deftype TransientDynamicMap [ftcoll m ^:mutable ^boolean edit]
   Object
   (conj! [_tcoll o]
     (if-let [f-conj! (:Transient.Object/conj! m)]
@@ -495,17 +495,17 @@
     (throw (js/Error. (str "Invalid arity: " (count args))))))
 
 (def empty-transformer-map
-  (let [etm (.-EMPTY PersistentFlexMap)]
+  (let [etm (.-EMPTY PersistentDynamicMap)]
     etm))
 
-(defn trans-map [& args]
+(defn dyna-map [& args]
   (-> (->> args
            (partition 2)
            (map vec)
            (into {})
-           (merge (.-EMPTY PersistentFlexMap)))
-      (assoc-method ::flex-invoke default-invoke))
-  #_(loop [in (seq args), out (transient (.-EMPTY PersistentFlexMap))]
+           (merge (.-EMPTY PersistentDynamicMap)))
+      (assoc-method ::dyna-invoke default-invoke))
+  #_(loop [in (seq args), out (transient (.-EMPTY PersistentDynamicMap))]
       (if in
         (let [in' (next in)]
           (if (nil? in')
@@ -515,14 +515,14 @@
 #_
 (comment
 
-  (def a (trans-map :a 1))
+  (def a (dyna-map :a 1))
   a
   (type a)
   (def b (assoc a :x 1))
   b
   (type b)
 
-  (def root (trans-map))
+  (def root (dyna-map))
   root
   (type root)
   (root)
@@ -550,8 +550,8 @@
   ; "Elapsed time: 13.000000 msecs"
 
   ;; (defn a+ [& args] (println :args args) (apply + args))
-  (def tm (trans-map :op + :a 1 :b 2))
-  (def tm (trans-map :a 1 :b 2))
+  (def tm (dyna-map :op + :a 1 :b 2))
+  (def tm (dyna-map :a 1 :b 2))
   tm
   (type tm)
   (tm 1)
@@ -607,15 +607,15 @@
   ; (tfn + :in #() :out #())
   ; tfmr ; tfn ; hash-map ;
 
-  trans-map ;=> #object [step-up$alpha$pthm$tf]
-  (trans-map) ;=> {:args [], :invoke-any #object [G__57451], :step-up.alpha.pthm/tform-end #object [step-up$alpha$pthm$endform], :step-up.alpha.pthm/ins ...
-  (def a+ (trans-map :op +)) ;=> #'step-up.alpha.pthm/a+
+  dyna-map ;=> #object [step-up$alpha$pthm$tf]
+  (dyna-map) ;=> {:args [], :invoke-any #object [G__57451], :step-up.alpha.pthm/tform-end #object [step-up$alpha$pthm$endform], :step-up.alpha.pthm/ins ...
+  (def a+ (dyna-map :op +)) ;=> #'step-up.alpha.pthm/a+
   (apply a+ 1 2 [3 4]) ;=> 10
 
-  (def b+ (trans-map :op +)) ;=> #'step-up.alpha.pthm/a+
+  (def b+ (dyna-map :op +)) ;=> #'step-up.alpha.pthm/a+
   (apply b+ 1 2 [3 4]) ;=> 10
 
-  (def x+ (trans-map :op + :x 1 :y 2))
+  (def x+ (dyna-map :op + :x 1 :y 2))
 
   x+
   (type x+)
@@ -628,7 +628,7 @@
   (apply {} [2 1])
 
 
-  ;; (def m (.-EMPTY PersistentFlexMap))
+  ;; (def m (.-EMPTY PersistentDynamicMap))
 
   ;; m
   ;; (type m)

@@ -1,8 +1,8 @@
 (ns step-up.alpha.root
   (:require
    [step-up.alpha.util :as u]
-   [step-up.alpha.trans-map :as fm
-    :refer [trans-map assoc-method
+   [step-up.alpha.dyna-map :as dm
+    :refer [dyna-map assoc-method
             ;; method contains-method? dissoc-method
             get-methods set-methods]]))
 
@@ -11,10 +11,10 @@
         tf* (update env :op #(or % u/identities))
         this (:this (:params tf*))
         tf* (merge tf* this)
-        ins (::fm/ins tf* identity)
-        tform (::fm/tform tf* identity)
-        outs (::fm/outs tf*)
-        tform-end (::fm/tform-end tf* identity)
+        ins (::dm/ins tf* identity)
+        tform (::dm/tform tf* identity)
+        outs (::dm/outs tf*)
+        tform-end (::dm/tform-end tf* identity)
         argss (if-not (seq (:in tf*))
                 args
                 (ins tf* args))
@@ -53,7 +53,7 @@
                              (mapv vec)
                              (into {})
                              (#(dissoc % :tf-pre))
-                             (merge fm/empty-transformer-map)
+                             (merge dm/empty-transformer-map)
                              (#(set-methods % meths)))]
         (or pre-env env)))))
 
@@ -79,26 +79,26 @@
                args)))
 
 (def root
-  (let [r (trans-map
+  (let [r (dyna-map
            :id [::root]
            :args []
-           ::fm/tform-pre preform
+           ::dm/tform-pre preform
            :tf-pre []
-           ::fm/ins ins
+           ::dm/ins ins
            :in []
-           ::fm/tform tform
+           ::dm/tform tform
            :tf []
-           ::fm/outs outs
+           ::dm/outs outs
            :out []
-           ::fm/tform-end endform
+           ::dm/tform-end endform
            :end [])]
-    (-> r (assoc-method ::fm/flex-invoke transformer-invoke))))
+    (-> r (assoc-method ::dm/dyna-invoke transformer-invoke))))
 
 #_
 (comment
 
-  (contains-method? root ::fm/flex-invoke)
-  (method root ::fm/flex-invoke)
+  (contains-method? root ::dm/dyna-invoke)
+  (method root ::dm/dyna-invoke)
   (get-methods root)
   (root)
   (root 1)
@@ -124,14 +124,14 @@
 #_
 (comment
 
-  (def a (trans-map :a 1))
+  (def a (dyna-map :a 1))
   a
   (type a)
   (def b (assoc a :x 1))
   b
   (type b)
 
-  ;; (def root (trans-map))
+  ;; (def root (dyna-map))
   root
   (type root)
   (root)
@@ -159,8 +159,8 @@
   ; "Elapsed time: 13.000000 msecs"
 
   ;; (defn a+ [& args] (println :args args) (apply + args))
-  (def tm (trans-map :op + :a 1 :b 2))
-  (def tm (trans-map :a 1 :b 2))
+  (def tm (dyna-map :op + :a 1 :b 2))
+  (def tm (dyna-map :a 1 :b 2))
   tm
   (type tm)
   (tm 1)
@@ -180,7 +180,7 @@
            :tf-end [::tf-end (fn [x] (println :tf-end x) x)]))
 
   ;;  (fn [x] (println :tf 2 :x x) x)))
-  ; constructor ; tran-map ; tfmr-map ; tform
+  ; constructor ; tran-map ; tdmr-map ; tform
   ; finally
   (:invoke-any x)
   (x :IFn/-invoke-any)
@@ -216,15 +216,15 @@
   ; (tfn + :in #() :out #())
   ; tfmr ; tfn ; hash-map ;
 
-  trans-map ;=> #object [step-up$alpha$pthm$tf]
-  (trans-map) ;=> {:args [], :invoke-any #object [G__57451], :step-up.alpha.pthm/tform-end #object [step-up$alpha$pthm$endform], :step-up.alpha.pthm/ins ...
-  (def a+ (trans-map :op +)) ;=> #'step-up.alpha.pthm/a+
+  dyna-map ;=> #object [step-up$alpha$pthm$tf]
+  (dyna-map) ;=> {:args [], :invoke-any #object [G__57451], :step-up.alpha.pthm/tform-end #object [step-up$alpha$pthm$endform], :step-up.alpha.pthm/ins ...
+  (def a+ (dyna-map :op +)) ;=> #'step-up.alpha.pthm/a+
   (apply a+ 1 2 [3 4]) ;=> 10
 
-  (def b+ (trans-map :op +)) ;=> #'step-up.alpha.pthm/a+
+  (def b+ (dyna-map :op +)) ;=> #'step-up.alpha.pthm/a+
   (apply b+ 1 2 [3 4]) ;=> 10
 
-  (def x+ (trans-map :op + :x 1 :y 2))
+  (def x+ (dyna-map :op + :x 1 :y 2))
 
   x+
   (type x+)
@@ -237,7 +237,7 @@
   (apply {} [2 1])
 
 
-  ;; (def m (.-EMPTY PersistentFlexMap))
+  ;; (def m (.-EMPTY PersistentDynamicMap))
 
   ;; m
   ;; (type m)

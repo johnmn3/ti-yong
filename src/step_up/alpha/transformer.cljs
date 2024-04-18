@@ -66,9 +66,9 @@
                     merges))))))
 
 #_(type transformer)
-#_(step-up.alpha.trans-map/-get-methods r/root)
-#_(step-up.alpha.trans-map/-get-methods transformer)
-#_(step-up.alpha.trans-map/-get-coll transformer)
+#_(step-up.alpha.dyna-map/-get-methods r/root)
+#_(step-up.alpha.dyna-map/-get-methods transformer)
+#_(step-up.alpha.dyna-map/-get-coll transformer)
 #_(transformer 1) ;=> 1
 #_
 (comment
@@ -220,7 +220,7 @@
                              {:args args})))
         (assoc :mock [[1 "2" 3 4 "5" 6] 21])))
 
-  (step-up.alpha.trans-map/get-methods +s)
+  (step-up.alpha.dyna-map/get-methods +s)
   (+s "1" 2)
 
   (defn vecs->ints [& s]

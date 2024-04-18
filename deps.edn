@@ -1,7 +1,11 @@
-{:paths ["src"]
+{:paths ["src" "test"]
  :deps {johnmn3/perc
         {:git/url "https://github.com/johnmn3/perc"
-         :sha "5f60211132fc40ea9c6a4ebe1bdd4e67d58b390a"}}
+         :sha "5f60211132fc40ea9c6a4ebe1bdd4e67d58b390a"}
+        org.clojure/clojure {:mvn/version "1.11.2"}
+        org.clojure/clojurescript {:mvn/version "1.11.132"}}
  :aliases
  {:cljs
-  {:extra-deps {thheller/shadow-cljs {:mvn/version "2.28.3"}}}}}
+  {:extra-deps {thheller/shadow-cljs {:mvn/version "2.28.3"}}}
+  :test {:extra-deps {olical/cljs-test-runner {:mvn/version "3.8.1"}}
+         :main-opts ["-m" "cljs-test-runner.main"]}}}

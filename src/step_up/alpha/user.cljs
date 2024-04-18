@@ -2,7 +2,7 @@
   (:require
    [cljs.math :as math]
    [clojure.edn :as edn]
-   [step-up.alpha.trans-map :as fm :refer [trans-map]]
+   [step-up.alpha.dyna-map :as fm :refer [dyna-map]]
    [step-up.alpha.root :as r :refer [root]]
    [step-up.alpha.transformer :refer [transformer]]
    [perc.core])) ; <- adds #%( ... %:some-key ...) anonymous fn syntax sugur
@@ -13,7 +13,7 @@
 
 (comment
 
-  (def user (trans-map :first-name "John" :last-name "Doe"))
+  (def user (dyna-map :first-name "John" :last-name "Doe"))
 
   (def u1
     (-> user
@@ -30,7 +30,7 @@
         (update :tf conj
                 ::t1 #(-> % (assoc :hello :world)))))
 
-  t1 ;=> {:args [], :tf-pre [], :step-up.alpha.trans-map/tform-pre #object [step-up$alpha$root$preform], :step-up.alpha.trans-map/outs ...
+  t1 ;=> {:args [], :tf-pre [], :step-up.alpha.dyna-map/tform-pre #object [step-up$alpha$root$preform], :step-up.alpha.dyna-map/outs ...
   (t1 1) ;=> 1
 
   ;;
