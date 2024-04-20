@@ -6,7 +6,7 @@
             ;; method contains-method? dissoc-method
             get-methods set-methods]]))
 
-(defn transformer-invoke [env args]
+(defn transformer-invoke [env & args]
   (let [args (concat (:args env) args)
         tf* (update env :op #(or % u/identities))
         this (:this (:params tf*))
@@ -43,19 +43,24 @@
   (some->> env :in u/uniq-by-pairwise-first (reduce (fn [argss in] ((or in identity) argss)) args) seq))
 
 (defn preform [env]
-  (let [meths (or (get-methods env) (:m env))]
-    (if-not (seq (:tf-pre env))
-      env
-      (let [pre-env (some->> env
-                             :tf-pre
-                             u/uniq-by-pairwise-first
-                             (reduce (fn [e tf] (tf e)) env)
+  (let [tf-pre (:tf-pre env)
+        initialized-set (or (get env :init-set) #{})
+        meths (::dm/methods env)]
+    (if (or (:instantiated? env) (not (seq tf-pre)))
+      (dissoc env :instantiated?)
+      (let [pre-env (some->> tf-pre
+                             (partition 2)
+                             (u/uniq-by first)
+                             (reduce (fn [e [id tf]]
+                                       (if-not (initialized-set id)
+                                         (let [res (tf e)]
+                                           (-> res (assoc :done-pre true)))
+                                         e))
+                                     env)
                              (mapv vec)
-                             (into {})
-                             (#(dissoc % :tf-pre))
-                             (merge dm/empty-dyna-map)
-                             (#(set-methods % meths)))]
-        (or pre-env env)))))
+                             (into {}))]
+        (-> (or pre-env (into {} env))
+            (assoc ::dm/methods meths))))))
 
 (defn tform [env]
   (if-not (seq (:tf env))
@@ -91,81 +96,83 @@
            ::dm/outs outs
            :out []
            ::dm/tform-end endform
-           :end [])]
+           :tf-end [])]
     (-> r (assoc-method ::dm/dyna-invoke transformer-invoke))))
 
-#_
-(comment
+#_(comment
 
-  (contains-method? root ::dm/dyna-invoke)
-  (method root ::dm/dyna-invoke)
-  (get-methods root)
-  (root)
-  (root 1)
-  (root :tf-pre)
-  (root :tf-pre-blah :not-found-here)
-  (root 1 2 3)
-  (apply root 1 [2 3])
+    (dyna-map :a 1) ;=> {:a 1}
+    (type (dyna-map :a 1)) ;=> step-up.alpha.dyna-map/PersistentDynamicMap
+    (contains-method? root ::dm/dyna-invoke)
+    (method root ::dm/dyna-invoke)
+    (get-methods root)
+    root
+    (root) ;=> nil
+    (type root) ;=> step-up.alpha.dyna-map/PersistentDynamicMap
+    (root 1) ;=> 1
+    (root :tf-pre) ;=> :tf-pre
+    (root :tf-pre-blah :not-found-here) ;=> (:tf-pre-blah :not-found-here)
+    (root 1 2 3) ;=> (1 2 3)
+    (apply root 1 [2 3]) ;=> (1 2 3)
 
-  (def r1 (-> root (assoc :op +)))
-  r1
-  (type r1)
-  (r1 1 2 3 4)
-  (r1 1 2 3)
-  (r1 1 2)
-  (r1 1)
-  (r1 1 2 3 [4 5])
-  (apply r1 1 2 3 [4 5])
-  (time (apply r1 1 2 3 (range 100000))) ;=> 4999950006
+    (def r1 (-> root (assoc :op +)))
+    r1
+    (type r1) ;=>  ;=> step-up.alpha.dyna-map/PersistentDynamicMap
+    (r1) ;=> 0
+    (r1 1 2 3 4) ;= 10
+    (r1 1) ;=> 1
+    (r1 1 2 3 [4 5]) ;=> "6[4 5]" 
+    (apply r1 1 2 3 [4 5]) ;=> 15
+    (time (apply r1 1 2 3 (range 100000))) ;=> 4999950006
   ; "Elapsed time: 12.000000 msecs"
 
-  (time (apply + 1 2 3 (range 100000))) ;=> 4999950006
+    (time (apply + 1 2 3 (range 100000))) ;=> 4999950006
   ; "Elapsed time: 13.000000 msecs"
 
-  (def x
-    (assoc root
-           :op +
+    (def x
+      (assoc root
+             :op +
           ;;  :x 1 :y 2))
-           :tf-pre [::tf-pre (fn [x] (println :tf-pre x) x)]
-           :in     [::in     (fn [x] (println :in     x) x)]
-           :tf     [::tf     (fn [x] (println :tf     x) x)]
-           :out    [::out    (fn [x] (println :out    x) x)]
-           :tf-end [::tf-end (fn [x] (println :tf-end x) x)]))
+             :tf-pre [::x-tf-pre (fn [x] (println :x-tf-pre x) x)]
+             :in     [::x-in     (fn [x] (println :x-in     x) x)]
+             :tf     [::x-tf     (fn [x] (println :x-tf     x) x)]
+             :out    [::x-out    (fn [x] (println :x-out    x) x)]
+             :tf-end [::x-tf-end (fn [x] (println :x-tf-end x) x)]))
 
-  x
-  (type x)
-  (x) ;=> 0
-  (apply x [1]) ;=> 1
-  (apply x 1 [2]) ;=> 3
-  (x 1 2 4) ;=> 7
-  (apply x 1 2 3 (range 25)) ;=> 306
-  (apply x 1 (range 5)) ;=> 11
+    x
+    (type x) ;=> step-up.alpha.dyna-map/PersistentDynamicMap
+    (x) ;=> 0
+    (apply x [1]) ;=> 1
+    (apply x 1 [2]) ;=> 3
+    (x 1 2 4) ;=> 7
+    (apply x 1 2 3 (range 25)) ;=> 306
+    (apply x 1 (range 5)) ;=> 11
 
-  (def y (assoc x :a 1 :b 2))
-  y
-  (y 1 2) ;=> 3
+    (def y (assoc x :a 1 :b 2))
+    y
+    (y 1 2) ;=> 3
 
-  (apply y 1 (range 5)) ;=> 11
+    (apply y 1 (range 5)) ;=> 11
 
-  (def z (assoc y :r 1 :k 2))
-  z
-  (z 1 2) ;=> 3
-  (apply z 1 (range 25)) ;=> 301
+    (def z (assoc y :r 1 :k 2))
+    z
+    (z 1 2) ;=> 3
+    (apply z 1 (range 25)) ;=> 301
 
-  root
-  (root) ;=> nil
-  (def a+ (assoc root :op +)) ;=> #'step-up.alpha.pthm/a+
-  (apply a+ 1 2 [3 4]) ;=> 10
+    root
+    (root) ;=> nil
+    (def a+ (assoc root :op +)) ;=> #'step-up.alpha.pthm/a+
+    (apply a+ 1 2 [3 4]) ;=> 10
 
-  (def x+ (assoc a+ :x 1 :y 2))
+    (def x+ (assoc a+ :x 1 :y 2))
 
-  x+
-  (type x+)
-  (x+) ;=> 0
-  (x+ 1) ;=> 1
-  (x+ 1 2) ;=> 3
-  (apply x+ 1 2 (range 23)) ;=> 256
-  (apply x+ 1 2 (range 2)) ;=> 4
-  (apply x+ [2 1]) ;=> 3
+    x+
+    (type x+)
+    (x+) ;=> 0
+    (x+ 1) ;=> 1
+    (x+ 1 2) ;=> 3
+    (apply x+ 1 2 (range 23)) ;=> 256
+    (apply x+ 1 2 (range 2)) ;=> 4
+    (apply x+ [2 1]) ;=> 3
 
-  :end)
+    :end)

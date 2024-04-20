@@ -9,35 +9,49 @@
 
 (defn default-invoke-handler
   [env & args]
-  (if-let [diy-default-invoke (get-in env [:m ::default-invoke])]
-    (apply diy-default-invoke env args)
-    (throw (js/Error. "No default invoke added"))))
+  (let [env (assoc (into {} env) :instantiated? true)]
+    (if-let [diy-default-invoke (or (get-in env [::methods ::default-invoke])
+                                    (get env ::default-invoke))]
+      (apply diy-default-invoke env args)
+      (do (println :error :args args :env env)
+          (throw (js/Error. "No default invoke added"))))))
 
 (defn handle-invoke [env & args]
-  (if-let [dynamic-invoke (get-in env [:m ::dyna-invoke])]
-    (apply dynamic-invoke env args)
-    (apply default-invoke-handler env args)))
+  (let [env (assoc (into {} env) :instantiated? true)]
+    (if-let [dynamic-invoke (or (get-in env [::methods ::dyna-invoke])
+                                (get env ::dyna-invoke))]
+      (apply dynamic-invoke env args)
+      (apply default-invoke-handler env args))))
 
 (declare get-methods assoc-method PersistentDynamicMap TransientDynamicMap)
 
+(defn attach-applyer! [pdm]
+  (set! (.-cljs$lang$applyTo pdm)
+        (fn [args]
+          (let [adm (assoc (into {} pdm) :instantiated? true)]
+            (apply handle-invoke (assoc adm ::methods (or (::methods adm) (get-methods pdm))) args))))
+  pdm)
+
 (defn PDM [facaded-coll methods]
-  (let [user-invoke (or (::default-invoke methods) default-map-invoke)
-        pdm (PersistentDynamicMap. facaded-coll (assoc methods ::default-invoke user-invoke))
-        tform-pre (::tform-pre pdm identity)
-        dm (or (tform-pre pdm) pdm)]
-    (set! (.-cljs$lang$applyTo dm)
-          (fn [args]
-            (apply handle-invoke (merge dm {:m (get-methods dm)}) args)))
-    dm))
+  (let [tform-pre (::tform-pre facaded-coll)
+        pre-env (if tform-pre
+                  (tform-pre (assoc facaded-coll ::methods methods))
+                  facaded-coll)
+        meths (or (::methods pre-env) methods)
+        user-invoke (or (::default-invoke meths) default-map-invoke)
+        new-meths (assoc meths ::default-invoke user-invoke)
+        pdm (PersistentDynamicMap. pre-env new-meths)]
+    (attach-applyer! pdm)
+    pdm))
 
 (defn TDM [facaded-coll methods edit]
-  (let [tdm (TransientDynamicMap. facaded-coll methods edit)
-        tform-pre (::Transient.tform-pre tdm identity)
-        dm (or (tform-pre tdm) tdm)]
-    (set! (.-cljs$lang$applyTo dm)
-          (fn [& args]
-            (apply handle-invoke (merge dm {:m (get-methods dm)}) args)))
-    dm))
+  (let [tform-pre (::Transient.tform-pre methods)
+        dm (if tform-pre
+             (tform-pre facaded-coll)
+             facaded-coll)
+        tdm (TransientDynamicMap. dm methods edit)]
+    (attach-applyer! tdm)
+    tdm))
 
 (defprotocol IDynamicAssociative
   (-assoc-method [coll k v])
@@ -80,107 +94,107 @@
   Object
   (toString [_coll]
     (if-let [f-pr-str* (:Object/pr-str* m)]
-      (f-pr-str* {:fcoll fcoll :m m})
+      (f-pr-str* {:fcoll fcoll ::methods m})
       (pr-str* fcoll)))
   (equiv [_this other]
     (if-let [f-equiv (:Object/-equiv m)]
-      (f-equiv {:fcoll fcoll :m m :other other})
+      (f-equiv {:fcoll fcoll ::methods m :other other})
       (-equiv fcoll other)))
   (keys [_coll]
     (if-let [f-es6-iterator (:Object/es6-iterator-keys m)]
-      (f-es6-iterator {:fcoll fcoll :m m})
-      (es6-iterator (keys fcoll))))
+      (f-es6-iterator {:fcoll fcoll ::methods m})
+      (keys fcoll)))
   (entries [_coll]
     (if-let [f-es6-entries-iterator (:Object/es6-entries-iterator m)]
-      (f-es6-entries-iterator {:fcoll fcoll :m m})
-      (es6-entries-iterator (seq fcoll))))
+      (f-es6-entries-iterator {:fcoll fcoll ::methods m})
+      (seq fcoll)))
   (values [_coll]
     (if-let [f-es6-iterator (:Object/es6-iterator-values m)]
-      (f-es6-iterator {:fcoll fcoll :m m})
-      (es6-iterator (vals fcoll))))
+      (f-es6-iterator {:fcoll fcoll ::methods m})
+      (vals fcoll)))
   (has [_coll k]
     (if-let [f-contains? (:Object/contains? m)]
-      (f-contains? {:fcoll fcoll :m m :k k})
+      (f-contains? {:fcoll fcoll ::methods m :k k})
       (contains? fcoll k)))
   (get [_coll k not-found]
     (if-let [f-lookup (:Object/-lookup m)]
-      (f-lookup {:fcoll fcoll :m m :k k :not-found not-found})
+      (f-lookup {:fcoll fcoll ::methods m :k k :not-found not-found})
       (-lookup fcoll k not-found)))
   (forEach [_coll f]
     (if-let [f-forEach (:Object/forEach m)]
-      (f-forEach {:fcoll fcoll :m m :f f})
+      (f-forEach {:fcoll fcoll ::methods m :f f})
       (doseq [[k v] fcoll]
         (f v k))))
 
   ICloneable
   (-clone [_]
     (if-let [f-clone (:ICloneable/-clone m)]
-      (f-clone {:fcoll fcoll :m m})
+      (f-clone {:fcoll fcoll ::methods m})
       (PDM (clone fcoll) (clone m))))
 
   IIterable
   (-iterator [_coll]
     (if-let [f-iterator (:IIterable/-iterator m)]
-      (f-iterator {:fcoll fcoll :m m})
+      (f-iterator {:fcoll fcoll ::methods m})
       (-iterator fcoll)))
 
   IWithMeta
   (-with-meta [_coll new-meta]
     (if-let [f-with-meta (:IWithMeta/-with-meta m)]
-      (f-with-meta {:fcoll fcoll :m m :new-meta new-meta})
+      (f-with-meta {:fcoll fcoll ::methods m :new-meta new-meta})
       (PDM (with-meta fcoll new-meta) m)))
 
   IMeta
   (-meta [_coll]
     (if-let [f-meta (:IMeta/-meta m)]
-      (f-meta {:fcoll fcoll :m m})
+      (f-meta {:fcoll fcoll ::methods m})
       (meta fcoll)))
 
   ICollection
   (-conj [_coll entry]
     (if-let [f-conj (:ICollection/-conj m)]
-      (f-conj {:fcoll fcoll :m m :entry entry})
+      (f-conj {:fcoll fcoll ::methods m :entry entry})
       (PDM (conj fcoll entry) m)))
 
   IEmptyableCollection
   (-empty [_coll]
     (if-let [f-empty (:IEmptyableCollection/-empty m)]
-      (f-empty {:fcoll fcoll :m m})
+      (f-empty {:fcoll fcoll ::methods m})
       (with-meta (.-EMPTY PersistentDynamicMap) (meta fcoll))))
 
   IEquiv
   (-equiv [_coll other]
     (if-let [f-equiv (:IEquiv/-equiv m)]
-      (f-equiv {:fcoll fcoll :m m :other other})
+      (f-equiv {:fcoll fcoll ::methods m :other other})
       (-equiv fcoll other)))
 
   IHash
   (-hash [_coll]
     (if-let [f-hash (:IHash/-hash m)]
-      (f-hash {:fcoll fcoll :m m})
+      (f-hash {:fcoll fcoll ::methods m})
       (hash fcoll)))
 
   ISeqable
   (-seq [_coll]
     (if-let [f-seq (:ISeqable/-seq m)]
-      (f-seq {:fcoll fcoll :m m})
+      (f-seq {:fcoll fcoll ::methods m})
       (seq fcoll)))
 
   ICounted
   (-count [_coll]
     (if-let [f-count (:ICounted/-count m)]
-      (f-count {:fcoll fcoll :m m})
+      (f-count {:fcoll fcoll ::methods m})
       (count fcoll)))
 
   ILookup
   (-lookup [_coll k]
     (if-let [f-lookup (:ILookup/-lookup2 m)]
-      (f-lookup {:fcoll fcoll :m m :k k})
+      (f-lookup {:fcoll fcoll ::methods m :k k})
       (-lookup fcoll k nil)))
 
   (-lookup [_coll k not-found]
     (if-let [f-lookup (:ILookup/-lookup3 m)]
-      (f-lookup {:fcoll fcoll :m m :k k :not-found not-found})
+      (f-lookup {:fcoll fcoll ::methods m :k k :not-found not-found})
       (-lookup fcoll k not-found)))
 
   IDynamicAssociative
@@ -202,123 +216,123 @@
   IAssociative
   (-assoc [_coll k v]
     (if-let [f-assoc (:IAssociative/-assoc m)]
-      (f-assoc {:fcoll fcoll :m m :k k :v v})
+      (f-assoc {:fcoll fcoll ::methods m :k k :v v})
       (PDM (assoc fcoll k v) m)))
   (-contains-key? [_coll k]
     (if-let [f-contains-key? (:IAssociative/-contains-key? m)]
-      (f-contains-key? {:fcoll fcoll :m m :k k})
+      (f-contains-key? {:fcoll fcoll ::methods m :k k})
       (contains? fcoll k)))
 
   IFind
   (-find [_coll k]
     (if-let [f-find (:IFind/-find m)]
-      (f-find {:fcoll fcoll :m m :k k})
+      (f-find {:fcoll fcoll ::methods m :k k})
       (-find fcoll k)))
 
   IMap
   (-dissoc [_coll k]
     (if-let [f-dissoc (:IMap/-dissoc m)]
-      (f-dissoc {:fcoll fcoll :m m :k k})
+      (f-dissoc {:fcoll fcoll ::methods m :k k})
       (PDM (dissoc fcoll k) m)))
 
   IKVReduce
   (-kv-reduce [_coll f init]
     (if-let [f-kv-reduce (:IKVReduce/-kv-reduce m)]
-      (f-kv-reduce {:fcoll fcoll :m m :f f :init init})
+      (f-kv-reduce {:fcoll fcoll ::methods m :f f :init init})
       (-kv-reduce fcoll f init)))
 
   IFn
   (-invoke [this]
-    (handle-invoke (merge fcoll (assoc this :fcoll fcoll :m m))))
+    (handle-invoke (merge fcoll (assoc this :fcoll fcoll ::methods m))))
   (-invoke [this arg1]
     (handle-invoke
-     (merge fcoll (assoc this :fcoll fcoll :m m))
+     (merge fcoll (assoc this :fcoll fcoll ::methods m))
      arg1))
   (-invoke [this arg1 arg2]
     (handle-invoke
-     (merge fcoll (assoc this :fcoll fcoll :m m))
+     (merge fcoll (assoc this :fcoll fcoll ::methods m))
      arg1 arg2))
   (-invoke [this arg1 arg2 arg3]
     (handle-invoke
-     (merge fcoll (assoc this :fcoll fcoll :m m))
+     (merge fcoll (assoc this :fcoll fcoll ::methods m))
      arg1 arg2 arg3))
   (-invoke [this arg1 arg2 arg3 arg4]
     (handle-invoke
-     (merge fcoll (assoc this :fcoll fcoll :m m))
+     (merge fcoll (assoc this :fcoll fcoll ::methods m))
      arg1 arg2 arg3 arg4))
   (-invoke [this arg1 arg2 arg3 arg4 arg5]
     (handle-invoke
-     (merge fcoll (assoc this :fcoll fcoll :m m))
+     (merge fcoll (assoc this :fcoll fcoll ::methods m))
      arg1 arg2 arg3 arg4 arg5))
   (-invoke [this arg1 arg2 arg3 arg4 arg5 arg6]
     (handle-invoke
-     (assoc this :fcoll fcoll :m m)
+     (assoc this :fcoll fcoll ::methods m)
      arg1 arg2 arg3 arg4 arg5 arg6))
   (-invoke [this arg1 arg2 arg3 arg4 arg5 arg6 arg7]
     (handle-invoke
-     (assoc this :fcoll fcoll :m m)
+     (assoc this :fcoll fcoll ::methods m)
      arg1 arg2 arg3 arg4 arg5 arg6 arg7))
   (-invoke [this arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8]
     (handle-invoke
-     (assoc this :fcoll fcoll :m m)
+     (assoc this :fcoll fcoll ::methods m)
      arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8))
   (-invoke [this arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9]
     (handle-invoke
-     (assoc this :fcoll fcoll :m m)
+     (assoc this :fcoll fcoll ::methods m)
      arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9))
   (-invoke [this arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10]
     (handle-invoke
-     (assoc this :fcoll fcoll :m m)
+     (assoc this :fcoll fcoll ::methods m)
      arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10))
   (-invoke [this arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11]
     (handle-invoke
-     (assoc this :fcoll fcoll :m m)
+     (assoc this :fcoll fcoll ::methods m)
      arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11))
   (-invoke [this arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11 arg12]
     (handle-invoke
-     (assoc this :fcoll fcoll :m m)
+     (assoc this :fcoll fcoll ::methods m)
      arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11 arg12))
   (-invoke [this arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11 arg12 arg13]
     (handle-invoke
-     (assoc this :fcoll fcoll :m m)
+     (assoc this :fcoll fcoll ::methods m)
      arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11 arg12 arg13))
   (-invoke [this arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11 arg12 arg13 arg14]
     (handle-invoke
-     (assoc this :fcoll fcoll :m m)
+     (assoc this :fcoll fcoll ::methods m)
      arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11 arg12 arg13 arg14))
   (-invoke [this arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11 arg12 arg13 arg14 arg15]
     (handle-invoke
-     (assoc this :fcoll fcoll :m m)
+     (assoc this :fcoll fcoll ::methods m)
      arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11 arg12 arg13 arg14 arg15))
   (-invoke [this arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11 arg12 arg13 arg14 arg15 arg16]
     (handle-invoke
-     (assoc this :fcoll fcoll :m m)
+     (assoc this :fcoll fcoll ::methods m)
      arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11 arg12 arg13 arg14 arg15 arg16))
   (-invoke [this arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11 arg12 arg13 arg14 arg15 arg16 arg17]
     (handle-invoke
-     (assoc this :fcoll fcoll :m m)
+     (assoc this :fcoll fcoll ::methods m)
      arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11 arg12 arg13 arg14 arg15 arg16 arg17))
   (-invoke [this arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11 arg12 arg13 arg14 arg15 arg16 arg17 arg18]
     (handle-invoke
-     (assoc this :fcoll fcoll :m m)
+     (assoc this :fcoll fcoll ::methods m)
      arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11 arg12 arg13 arg14 arg15 arg16 arg17 arg18))
   (-invoke [this arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11 arg12 arg13 arg14 arg15 arg16 arg17 arg18 arg19]
     (handle-invoke
-     (assoc this :fcoll fcoll :m m)
+     (assoc this :fcoll fcoll ::methods m)
      arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11 arg12 arg13 arg14 arg15 arg16 arg17 arg18 arg19))
   (-invoke [this arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11 arg12 arg13 arg14 arg15 arg16 arg17 arg18 arg19 arg20]
     (handle-invoke
-     (assoc this :fcoll fcoll :m m)
+     (assoc this :fcoll fcoll ::methods m)
      arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11 arg12 arg13 arg14 arg15 arg16 arg17 arg18 arg19 arg20))
   (-invoke [this arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11 arg12 arg13 arg14 arg15 arg16 arg17 arg18 arg19 arg20 rest-args]
     (handle-invoke
-     (assoc this :fcoll fcoll :m m)
+     (assoc this :fcoll fcoll ::methods m)
      arg1 arg2 arg3 arg4 arg5 arg6 arg7 arg8 arg9 arg10 arg11 arg12 arg13 arg14 arg15 arg16 arg17 arg18 arg19 arg20 rest-args))
 
   IEditableCollection
   (-as-transient [_coll]
     (if-let [f-as-transient (:IEditableCollection/-as-transient m)]
-      (f-as-transient {:fcoll fcoll :m m})
+      (f-as-transient {:fcoll fcoll ::methods m})
       (TDM (transient fcoll) (transient m) true))))
 
 (extend-protocol IPrintWithWriter
@@ -366,19 +380,19 @@
   Object
   (conj! [_tcoll o]
     (if-let [f-conj! (:Transient.Object/conj! m)]
-      (f-conj! {:fcoll ftcoll :m m :o o})
+      (f-conj! {:fcoll ftcoll ::methods m :o o})
       (conj! ftcoll o)))
   (assoc! [_tcoll k v]
     (if-let [f-assoc! (:Transient.Object/assoc! m)]
-      (f-assoc! {:fcoll ftcoll :m m :k k :v v})
+      (f-assoc! {:fcoll ftcoll ::methods m :k k :v v})
       (assoc! ftcoll k v)))
   (without! [_tcoll k]
     (if-let [f-without! (:Transient.Object/without! m)]
-      (f-without! {:fcoll ftcoll :m m :k k})
+      (f-without! {:fcoll ftcoll ::methods m :k k})
       ^js (.without! ftcoll k)))
   (persistent! [_tcoll]
     (if-let [f-persistent! (:Transient.Object/persistent! m)]
-      (f-persistent! {:fcoll ftcoll :m m})
+      (f-persistent! {:fcoll ftcoll ::methods m})
       (if edit
         (do (set! edit nil)
             (PDM (persistent! ftcoll) (persistent! m)))
@@ -387,7 +401,7 @@
   ICounted
   (-count [_coll]
     (if-let [f-count (:Transient.ICounted/-count m)]
-      (f-count {:fcoll ftcoll :m m})
+      (f-count {:fcoll ftcoll ::methods m})
       (if edit
         (count ftcoll)
         (throw (js/Error. "count after persistent!")))))
@@ -395,35 +409,35 @@
   ILookup
   (-lookup [_tcoll k]
     (if-let [f-lookup (:Transient.ILookup/-lookup2 m)]
-      (f-lookup {:fcoll ftcoll :m m :k k})
+      (f-lookup {:fcoll ftcoll ::methods m :k k})
       (-lookup ftcoll k)))
 
   (-lookup [_tcoll k not-found]
     (if-let [f-lookup (:Transient.ILookup/-lookup3 m)]
-      (f-lookup {:fcoll ftcoll :m m :k k :not-found not-found})
+      (f-lookup {:fcoll ftcoll ::methods m :k k :not-found not-found})
       (-lookup ftcoll k not-found)))
 
   ITransientCollection
   (-conj! [_tcoll val]
     (if-let [f-conj! (:Transient.ITransientCollection/-conj! m)]
-      (f-conj! {:fcoll ftcoll :m m :val val})
+      (f-conj! {:fcoll ftcoll ::methods m :val val})
       (conj! ftcoll val)))
 
   (-persistent! [_tcoll]
     (if-let [f-persistent! (:Transient.ITransientCollection/-persistent! m)]
-      (f-persistent! {:fcoll ftcoll :m m})
+      (f-persistent! {:fcoll ftcoll ::methods m})
       (persistent! ftcoll)))
 
   ITransientAssociative
   (-assoc! [_tcoll key val]
     (if-let [f-assoc! (:Transient.ITransientAssociative/-assoc! m)]
-      (f-assoc! {:fcoll ftcoll :m m :key key :val val})
+      (f-assoc! {:fcoll ftcoll ::methods m :key key :val val})
       (assoc! ftcoll key val)))
 
   ITransientMap
   (-dissoc! [_tcoll key]
     (if-let [f-dissoc! (:Transient.ITransientMap/-dissoc! m)]
-      (f-dissoc! {:fcoll ftcoll :m m :key key})
+      (f-dissoc! {:fcoll ftcoll ::methods m :key key})
       (dissoc! ftcoll key))))
 
 (def empty-dyna-map (.-EMPTY PersistentDynamicMap))
