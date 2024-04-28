@@ -1,20 +1,21 @@
 (ns step-up.alpha.root
   (:require
    [step-up.alpha.util :as u]
+   [clojure.spec.alpha :as s]
    [step-up.alpha.dyna-map :as dm
-    :refer [dyna-map assoc-method
+    :refer [dyna-map assoc-method]]))
             ;; method contains-method? dissoc-method
-            get-methods set-methods]]))
+            ;; get-methods set-methods]]))
 
 (defn transformer-invoke [env & args]
   (let [args (concat (:args env) args)
         tf* (update env :op #(or % u/identities))
         this (:this (:params tf*))
         tf* (merge tf* this)
-        ins (::dm/ins tf* identity)
-        tform (::dm/tform tf* identity)
-        outs (::dm/outs tf*)
-        tform-end (::dm/tform-end tf* identity)
+        ins (::ins tf* identity)
+        tform (::tform tf* identity)
+        outs (::outs tf*)
+        tform-end (::tform-end tf* identity)
         argss (if-not (seq (:in tf*))
                 args
                 (ins tf* args))
@@ -42,7 +43,26 @@
 (defn ins [env args]
   (some->> env :in u/uniq-by-pairwise-first (reduce (fn [argss in] ((or in identity) argss)) args) seq))
 
+(s/def ::id vector?)
+(s/def ::args vector?)
+(s/def ::tform-pre fn?)
+(s/def ::tf-pre vector?)
+(s/def ::ins fn?)
+(s/def ::in vector?)
+(s/def ::tform fn?)
+(s/def ::tf vector?)
+(s/def ::outs fn?)
+(s/def ::out vector?)
+(s/def ::tform-end fn?)
+(s/def ::tf-end vector?)
+
+(s/def ::root
+  (s/keys :req [::tform-pre ::ins ::tform ::outs ::tform-end]
+          :req-un [::id ::args ::tf-pre ::in ::tf ::out ::tf-end]))
+
 (defn preform [env]
+  (when-not (s/valid? ::root env)
+    (throw (js/Error. (:cljs.spec.alpha/problems (s/explain-data ::root env)))))
   (let [tf-pre (:tf-pre env)
         initialized-set (or (get env :init-set) #{})
         meths (::dm/methods env)]
@@ -87,20 +107,21 @@
   (let [r (dyna-map
            :id [::root]
            :args []
-           ::dm/tform-pre preform
+           ::tform-pre preform
            :tf-pre []
-           ::dm/ins ins
+           ::ins ins
            :in []
-           ::dm/tform tform
+           ::tform tform
            :tf []
-           ::dm/outs outs
+           ::outs outs
            :out []
-           ::dm/tform-end endform
+           ::tform-end endform
            :tf-end [])]
     (-> r (assoc-method ::dm/dyna-invoke transformer-invoke))))
 
 #_(comment
 
+    (dissoc root :args) ;=> :repl/exception!
     (dyna-map :a 1) ;=> {:a 1}
     (type (dyna-map :a 1)) ;=> step-up.alpha.dyna-map/PersistentDynamicMap
     (contains-method? root ::dm/dyna-invoke)

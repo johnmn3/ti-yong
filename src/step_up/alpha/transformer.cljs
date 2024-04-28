@@ -1,6 +1,6 @@
 (ns step-up.alpha.transformer
   (:require
-;;    [clojure.edn :as edn]
+   [clojure.spec.alpha :as s]
    [step-up.alpha.util :as u]
    [step-up.alpha.root :as r]))
 
@@ -42,95 +42,160 @@
        (mapcat identity)
        vec))
 
+(s/def ::id (s/coll-of qualified-keyword? :kind vector?))
+(s/def ::specs (s/coll-of qualified-keyword? :kind vector?))
+(s/def ::with (s/coll-of ::transformer :kind vector?))
+
+(s/def ::transformer
+  (s/keys :opt-un [::specs ::with ::id]))
+
 (def transformer
   (-> r/root
       (update :id conj ::transformer)
-      (assoc :with [])
+      (assoc :with [] :specs [::transformer ::transformer])
       (update :tf-pre conj
+              ::spec
+              (fn spec-tf [{:as env :keys [specs]}]
+                (if-not (seq specs)
+                  env
+                  (let [s (->> specs (partition 2) (u/uniq-by first) (map vec))]
+                    (doseq [spec (map second s)]
+                      (when-not (s/valid? spec env)
+                        (throw
+                         (js/Error. (->> env ;; <- use ex-data/ex-info here?
+                                         (s/explain-data spec)
+                                         :cljs.spec.alpha/problems
+                                         first
+                                         :pred
+                                         (str spec " "))))))
+                    (assoc env :specs (vec (mapcat identity s))))))
               ::with
               (fn with-tf [{:as env :keys [with]}]
                 (if-not (seq with)
                   env
                   (let [separated (->> with reverse (mapcat #(do [(last (:id %)) %])) (apply separate))
+                        specs (:specs env [])
                         merges  (if-not (seq separated)
                                   env
                                   (->> separated
                                        (partition 2)
                                        (mapv #(second %))
-                                       (#(apply combine (into % [(dissoc env :with)])))))
+                                       (#(apply combine (into % [(dissoc env :with :specs)])))))
                         merges (-> merges
                                    (update :id (comp vec distinct)))]
-                    merges))))))
+                    (update merges :specs into specs)))))))
 
-#_(type transformer)
-#_(step-up.alpha.dyna-map/-get-methods r/root)
-#_(step-up.alpha.dyna-map/-get-methods transformer)
-#_(step-up.alpha.dyna-map/-get-coll transformer)
-#_(transformer 1) ;=> 1
-#_
 (comment
+
+  (s/def ::a int?)
+  (s/def ::a-spec (s/keys :req-un [::a]))
+  (def a
+    (-> transformer
+        (update :id conj ::a)
+        ;; (assoc :a 1)
+        (update :specs conj ::a ::a-spec)
+        (update :tf conj ::a (fn [env] (println ::a-tf :env env) env)))) ;=> :repl/exception!
+  ; Execution error (Error) at (<cljs repl>:1).
+  ; :step-up.alpha.transformer/a-spec (cljs.core/fn [%] (cljs.core/contains? % :a))
 
   (def a
     (-> transformer
         (update :id conj ::a)
         (assoc :a 1)
-        (update :tf conj ::a (fn [env] (println ::a-tf :env env) env))))
-  #_(:tf a)
-  #_(:id a)
+        (update :specs conj ::a ::a-spec)
+        (update :tf conj ::a (fn [env] (println ::a-tf :env env) env)))) ;=> #'step-up.alpha.transformer/a
 
+  #_(dissoc a :a) ;=> :repl/exception!
+  ; Execution error (Error) at (<cljs repl>:1).
+  ; :step-up.alpha.transformer/a-spec
+  
+  (s/def ::b int?)
+  (s/def ::b-spec (s/keys :req-un [::b]))
   (def b
     (-> transformer
         (update :id conj ::b)
         (assoc :b 2)
+        (update :specs conj ::b ::b-spec)
         (update :with conj a)
         (update :tf conj ::b (fn [env] (println ::b-tf :env env) env))))
+  #_(dissoc b :a)
   #_(:tf b)
   #_(:id b)
+  #_(:specs b)
+  #_(:b b)
   #_b
 
+  (s/def ::c int?)
+  (s/def ::c-spec (s/keys :req-un [::c]))
   (def c
     (-> transformer
         (update :id conj ::c)
         (assoc :c 3)
+        (update :specs conj ::c ::c-spec)
         (update :with conj b)
         (update :tf conj ::c (fn [env] (println ::c-tf :env env) env))))
   #_(:tf c)
   #_(:id c)
+  #_(:specs c)
 
+  (s/def ::x int?)
+  (s/def ::x-spec (s/keys :req-un [::x]))
   (def x
     (-> transformer
         (update :id conj ::x)
         (update :with conj a c)
         (assoc :x 20)
+        (update :specs conj ::x ::x-spec)
         (update :tf conj ::x (fn [env] (println ::x-tf :env env) env))))
   #_(:tf x)
   #_(:id x)
-  x
+  #_(:specs x)
 
+  (s/def ::y int?)
+  (s/def ::y-spec (s/keys :req-un [::y]))
   (def y
     (-> transformer
         (update :id conj ::y)
-        (update :with conj c x b a)
-                       ;; ^^^ can be in any order because their orders are already defined in x and c 
+        (update :with conj a b c x)
         (assoc :y 21)
+        (update :specs conj ::y ::y-spec)
         (update :tf conj ::y (fn [env] (println ::y-tf :env env) env))))
   #_(:id y)
+  #_(:specs y)
 
 
+  (s/def ::z int?)
+  (s/def ::z-spec (s/keys :req-un [::z]))
   (def z
-    (-> transformer
+    (-> x
         (update :id conj ::z)
         (update :with conj y)
         (assoc :z 22)
+        (update :specs conj ::z ::z-spec)
         (update :tf conj ::z (fn [env] (println ::z-tf :env env) env))))
   #_z
 
+  (s/def ::r int?)
+  (s/def ::r-spec (s/keys :req-un [::r])) 
   (def r
-    (-> transformer
+    (-> b
         (update :id conj ::r)
-        (update :with conj z c)
+        (update :with conj c z)
         (assoc :r 21)
+        (update :specs conj ::r ::r-spec)
         (update :tf conj ::r (fn [env] (println ::r-tf :env env) env))))
+  #_(= (:specs r)
+       [:step-up.alpha.transformer/transformer :step-up.alpha.transformer/transformer :step-up.alpha.transformer/a :step-up.alpha.transformer/a-spec :step-up.alpha.transformer/b :step-up.alpha.transformer/b-spec :step-up.alpha.transformer/c :step-up.alpha.transformer/c-spec :step-up.alpha.transformer/x :step-up.alpha.transformer/x-spec :step-up.alpha.transformer/y :step-up.alpha.transformer/y-spec :step-up.alpha.transformer/z :step-up.alpha.transformer/z-spec :step-up.alpha.transformer/r :step-up.alpha.transformer/r-spec])
+
+  (= {:failed ":step-up.alpha.transformer/a-spec (cljs.core/fn [%] (cljs.core/contains? % :a))"}
+     (try (dissoc r :a)
+          (catch :default e
+            {:failed (->> e str (drop 7) (apply str))})))
+
+  (= {:failed ":step-up.alpha.transformer/x-spec (cljs.core/fn [%] (cljs.core/contains? % :x))"}
+     (try (dissoc r :x)
+          (catch :default e
+            {:failed (->> e str (drop 7) (apply str))})))
 
   r
   (= :root|transformer|a|b|c|x|y|z|r
@@ -285,4 +350,3 @@
   ; Failure in :step-up.alpha.transformer/+sv with mock inputs [1 "2" 3 4 "5" 6] when expecting 21 but actually got "123456"
 
   :end)
-  

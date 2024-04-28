@@ -33,7 +33,7 @@
   pdm)
 
 (defn PDM [facaded-coll methods]
-  (let [tform-pre (::tform-pre facaded-coll)
+  (let [tform-pre (:step-up.alpha.root/tform-pre facaded-coll)
         pre-env (if tform-pre
                   (tform-pre (assoc facaded-coll ::methods methods))
                   facaded-coll)

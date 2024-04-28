@@ -1,7 +1,8 @@
 (ns step-up.alpha.transformer-test
   (:require
-   [clojure.test :refer [deftest is]]
    [clojure.edn :as edn]
+   [clojure.spec.alpha :as s]
+   [clojure.test :refer [deftest is]]
    [step-up.alpha.dyna-map :as dm]
    [step-up.alpha.transformer :as t]
    [step-up.alpha.util :as u]))
@@ -125,8 +126,8 @@
       (assoc k n)
       (update :with into mixins)
       (update :tf conj k (fn [env] (println ::tf k :env env) env))))
-#_ (::a (with-test-for-key ::a 1)) ;=> 1
-#_ (count (with-test-for-key ::a 1)) ;=> 16
+#_ (::a (with-transformer-for-key ::a 1)) ;=> 1
+#_ (count (with-transformer-for-key ::a 1)) ;=> 16
 
 
 (deftest transformer-with-test
@@ -161,6 +162,60 @@
            (with-out-str (-> x 
                              (assoc :a 1 :b 2 :c 3 :d 4 :e 5)
                              (apply 1 [2 3])))))))
+
+(defn with-transformer-for-spec [kname k n sspec & mixins]
+  (-> t/transformer
+      (update :id conj k)
+      (update :with into mixins)
+      (assoc kname n)
+      (update :specs conj k sspec)
+      (update :tf conj k (fn [env] (println ::tf k :env env) env))))
+
+(s/def ::a int?)
+(s/def ::a-spec (s/keys :req-un [::a]))
+(s/def ::b int?)
+(s/def ::b-spec (s/keys :req-un [::b]))
+(s/def ::c int?)
+(s/def ::c-spec (s/keys :req-un [::c]))
+(s/def ::x int?)
+(s/def ::x-spec (s/keys :req-un [::x]))
+(s/def ::y int?)
+(s/def ::y-spec (s/keys :req-un [::y]))
+(s/def ::z int?)
+(s/def ::z-spec (s/keys :req-un [::z]))
+(s/def ::r int?)
+(s/def ::r-spec (s/keys :req-un [::r]))
+
+(deftest transformer-spec-test
+  (let [a (with-transformer-for-spec :a ::a 1 ::a-spec)
+        b (with-transformer-for-spec :b ::b 2 ::b-spec a)
+        c (with-transformer-for-spec :c ::c 3 ::c-spec b)
+        x (with-transformer-for-spec :x ::x 7 ::x-spec a c)
+        y (with-transformer-for-spec :y ::y 8 ::y-spec a b c x)
+        z (with-transformer-for-spec :z ::z 9 ::z-spec y)
+        r (with-transformer-for-spec :r ::r 10 ::r-spec c z)]
+    (is (= {:failed ":step-up.alpha.transformer-test/a-spec (cljs.core/fn [%] (cljs.core/contains? % :a))"}
+           (try (dissoc a :a)
+                (catch :default e
+                  {:failed (->> e str (drop 7) (apply str))}))))
+
+    (is (= {:failed ":step-up.alpha.transformer-test/a-spec (cljs.core/fn [%] (cljs.core/contains? % :a))"}
+           (try (dissoc x :a)
+                (catch :default e
+                  {:failed (->> e str (drop 7) (apply str))}))))
+    (is (= {:failed ":step-up.alpha.transformer-test/x-spec (cljs.core/fn [%] (cljs.core/contains? % :x))"}
+           (try (dissoc x :x)
+                (catch :default e
+                  {:failed (->> e str (drop 7) (apply str))}))))
+
+    (is (= {:failed ":step-up.alpha.transformer-test/a-spec (cljs.core/fn [%] (cljs.core/contains? % :a))"}
+           (try (dissoc r :a)
+                (catch :default e
+                  {:failed (->> e str (drop 7) (apply str))}))))
+    (is (= {:failed ":step-up.alpha.transformer-test/r-spec (cljs.core/fn [%] (cljs.core/contains? % :r))"}
+           (try (dissoc r :r)
+                (catch :default e
+                  {:failed (->> e str (drop 7) (apply str))}))))))
 
 (comment
   
