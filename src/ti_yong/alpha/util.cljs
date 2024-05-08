@@ -1,4 +1,4 @@
-(ns step-up.alpha.util)
+(ns ti-yong.alpha.util)
 
 (defn if-cljs
   [env then else]

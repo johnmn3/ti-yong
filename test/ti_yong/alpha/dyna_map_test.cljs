@@ -1,7 +1,7 @@
-(ns step-up.alpha.dyna-map-test
+(ns ti-yong.alpha.dyna-map-test
   (:require
    [clojure.test :refer [deftest is]]
-   [step-up.alpha.dyna-map :as dm]))
+   [ti-yong.alpha.dyna-map :as dm]))
 
 (deftest dyna-map-build-test
   (is (= dm/PersistentDynamicMap (type (dm/dyna-map))))

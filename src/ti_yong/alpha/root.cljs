@@ -1,8 +1,8 @@
-(ns step-up.alpha.root
+(ns ti-yong.alpha.root
   (:require
-   [step-up.alpha.util :as u]
+   [ti-yong.alpha.util :as u]
    [clojure.spec.alpha :as s]
-   [step-up.alpha.dyna-map :as dm
+   [ti-yong.alpha.dyna-map :as dm
     :refer [dyna-map assoc-method]]))
             ;; method contains-method? dissoc-method
             ;; get-methods set-methods]]))
@@ -123,13 +123,13 @@
 
     (dissoc root :args) ;=> :repl/exception!
     (dyna-map :a 1) ;=> {:a 1}
-    (type (dyna-map :a 1)) ;=> step-up.alpha.dyna-map/PersistentDynamicMap
+    (type (dyna-map :a 1)) ;=> ti-yong.alpha.dyna-map/PersistentDynamicMap
     (contains-method? root ::dm/dyna-invoke)
     (method root ::dm/dyna-invoke)
     (get-methods root)
     root
     (root) ;=> nil
-    (type root) ;=> step-up.alpha.dyna-map/PersistentDynamicMap
+    (type root) ;=> ti-yong.alpha.dyna-map/PersistentDynamicMap
     (root 1) ;=> 1
     (root :tf-pre) ;=> :tf-pre
     (root :tf-pre-blah :not-found-here) ;=> (:tf-pre-blah :not-found-here)
@@ -138,7 +138,7 @@
 
     (def r1 (-> root (assoc :op +)))
     r1
-    (type r1) ;=>  ;=> step-up.alpha.dyna-map/PersistentDynamicMap
+    (type r1) ;=>  ;=> ti-yong.alpha.dyna-map/PersistentDynamicMap
     (r1) ;=> 0
     (r1 1 2 3 4) ;= 10
     (r1 1) ;=> 1
@@ -161,7 +161,7 @@
              :tf-end [::x-tf-end (fn [x] (println :x-tf-end x) x)]))
 
     x
-    (type x) ;=> step-up.alpha.dyna-map/PersistentDynamicMap
+    (type x) ;=> ti-yong.alpha.dyna-map/PersistentDynamicMap
     (x) ;=> 0
     (apply x [1]) ;=> 1
     (apply x 1 [2]) ;=> 3
@@ -182,7 +182,7 @@
 
     root
     (root) ;=> nil
-    (def a+ (assoc root :op +)) ;=> #'step-up.alpha.pthm/a+
+    (def a+ (assoc root :op +)) ;=> #'ti-yong.alpha.pthm/a+
     (apply a+ 1 2 [3 4]) ;=> 10
 
     (def x+ (assoc a+ :x 1 :y 2))

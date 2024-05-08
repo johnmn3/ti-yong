@@ -1,4 +1,4 @@
-(ns step-up.alpha.dyna-map)
+(ns ti-yong.alpha.dyna-map)
 
 (defn default-map-invoke [env & args]
   (case (count args)
@@ -33,7 +33,7 @@
   pdm)
 
 (defn PDM [facaded-coll methods]
-  (let [tform-pre (:step-up.alpha.root/tform-pre facaded-coll)
+  (let [tform-pre (:ti-yong.alpha.root/tform-pre facaded-coll)
         pre-env (if tform-pre
                   (tform-pre (assoc facaded-coll ::methods methods))
                   facaded-coll)
@@ -456,14 +456,14 @@
 
   (def a (dyna-map :a 1))
   a ;=> {:a 1}
-  (type a) ;=> step-up.alpha.dyna-map/PersistentDynamicMap
+  (type a) ;=> ti-yong.alpha.dyna-map/PersistentDynamicMap
   (def b (assoc a :x 1))
   b ;=> {:a 1, :x 1}
-  (type b) ;=> step-up.alpha.dyna-map/PersistentDynamicMap
+  (type b) ;=> ti-yong.alpha.dyna-map/PersistentDynamicMap
 
   (def root (dyna-map))
   root ;=> {}
-  (type root) ;=> step-up.alpha.dyna-map/PersistentDynamicMap
+  (type root) ;=> ti-yong.alpha.dyna-map/PersistentDynamicMap
   (root) ;=> :repl/exception!
   ; Execution error (Error) at (<cljs repl>:1).
   ; Invalid arity: 0
@@ -481,7 +481,7 @@
 
   (def a1 (assoc empty-dyna-map :a 1))
   a1 ;=> {:a 1}
-  (type a1) ;=> step-up.alpha.dyna-map/PersistentDynamicMap
+  (type a1) ;=> ti-yong.alpha.dyna-map/PersistentDynamicMap
   (a1 1 2 3 4 5) ;=> :repl/exception!
   ; Execution error (Error) at (<cljs repl>:1).
   ; No default invoke added
@@ -489,7 +489,7 @@
   (empty-dyna-map 1) ;=> nil
 
   (def b1 (assoc a1 :hello :world))
-  (type b1) ;=> step-up.alpha.dyna-map/PersistentDynamicMap
+  (type b1) ;=> ti-yong.alpha.dyna-map/PersistentDynamicMap
   b1 ;=> {:a 1, :hello :world}
   (apply b1 1 [2]) ;=> 2  ;<- not-found
   (b1 [1 2 3 4]) ;=> nil
@@ -504,7 +504,7 @@
 
   (def c1 (assoc b1 :good :stuff))
   c1 ;=> {:a 1, :hello :world, :good :stuff}
-  (type c1) ;=> step-up.alpha.dyna-map/PersistentDynamicMap
+  (type c1) ;=> ti-yong.alpha.dyna-map/PersistentDynamicMap
   (c1 :hello) ;=> :world
   (:hello c1) ;=> :world
   (c1 :hello :big :blue :world) ;=> :repl/exception!

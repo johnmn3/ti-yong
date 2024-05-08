@@ -1,8 +1,8 @@
-(ns step-up.alpha.transformer
+(ns ti-yong.alpha.transformer
   (:require
    [clojure.spec.alpha :as s]
-   [step-up.alpha.util :as u]
-   [step-up.alpha.root :as r]))
+   [ti-yong.alpha.util :as u]
+   [ti-yong.alpha.root :as r]))
 
 (defn- combine
   [m & maps]
@@ -96,18 +96,18 @@
         (update :specs conj ::a ::a-spec)
         (update :tf conj ::a (fn [env] (println ::a-tf :env env) env)))) ;=> :repl/exception!
   ; Execution error (Error) at (<cljs repl>:1).
-  ; :step-up.alpha.transformer/a-spec (cljs.core/fn [%] (cljs.core/contains? % :a))
+  ; :ti-yong.alpha.transformer/a-spec (cljs.core/fn [%] (cljs.core/contains? % :a))
 
   (def a
     (-> transformer
         (update :id conj ::a)
         (assoc :a 1)
         (update :specs conj ::a ::a-spec)
-        (update :tf conj ::a (fn [env] (println ::a-tf :env env) env)))) ;=> #'step-up.alpha.transformer/a
+        (update :tf conj ::a (fn [env] (println ::a-tf :env env) env)))) ;=> #'ti-yong.alpha.transformer/a
 
   #_(dissoc a :a) ;=> :repl/exception!
   ; Execution error (Error) at (<cljs repl>:1).
-  ; :step-up.alpha.transformer/a-spec
+  ; :ti-yong.alpha.transformer/a-spec
   
   (s/def ::b int?)
   (s/def ::b-spec (s/keys :req-un [::b]))
@@ -185,14 +185,14 @@
         (update :specs conj ::r ::r-spec)
         (update :tf conj ::r (fn [env] (println ::r-tf :env env) env))))
   #_(= (:specs r)
-       [:step-up.alpha.transformer/transformer :step-up.alpha.transformer/transformer :step-up.alpha.transformer/a :step-up.alpha.transformer/a-spec :step-up.alpha.transformer/b :step-up.alpha.transformer/b-spec :step-up.alpha.transformer/c :step-up.alpha.transformer/c-spec :step-up.alpha.transformer/x :step-up.alpha.transformer/x-spec :step-up.alpha.transformer/y :step-up.alpha.transformer/y-spec :step-up.alpha.transformer/z :step-up.alpha.transformer/z-spec :step-up.alpha.transformer/r :step-up.alpha.transformer/r-spec])
+       [:ti-yong.alpha.transformer/transformer :ti-yong.alpha.transformer/transformer :ti-yong.alpha.transformer/a :ti-yong.alpha.transformer/a-spec :ti-yong.alpha.transformer/b :ti-yong.alpha.transformer/b-spec :ti-yong.alpha.transformer/c :ti-yong.alpha.transformer/c-spec :ti-yong.alpha.transformer/x :ti-yong.alpha.transformer/x-spec :ti-yong.alpha.transformer/y :ti-yong.alpha.transformer/y-spec :ti-yong.alpha.transformer/z :ti-yong.alpha.transformer/z-spec :ti-yong.alpha.transformer/r :ti-yong.alpha.transformer/r-spec])
 
-  (= {:failed ":step-up.alpha.transformer/a-spec (cljs.core/fn [%] (cljs.core/contains? % :a))"}
+  (= {:failed ":ti-yong.alpha.transformer/a-spec (cljs.core/fn [%] (cljs.core/contains? % :a))"}
      (try (dissoc r :a)
           (catch :default e
             {:failed (->> e str (drop 7) (apply str))})))
 
-  (= {:failed ":step-up.alpha.transformer/x-spec (cljs.core/fn [%] (cljs.core/contains? % :x))"}
+  (= {:failed ":ti-yong.alpha.transformer/x-spec (cljs.core/fn [%] (cljs.core/contains? % :x))"}
      (try (dissoc r :x)
           (catch :default e
             {:failed (->> e str (drop 7) (apply str))})))
@@ -320,7 +320,7 @@
                              {:args args})))
         (assoc :mock [[1 "2" 3 4 "5" 6] 21])))
 
-  (step-up.alpha.dyna-map/get-methods +s)
+  (ti-yong.alpha.dyna-map/get-methods +s)
   (+s 100 1)
 
   (defn vecs->ints [& s]
@@ -333,7 +333,7 @@
                 ::+sv
                 #%(merge % (when-let [args (apply vecs->ints %:args)]
                              {:args args})))
-        (update :mock conj ["1" [2]] 3))) ;=> #'step-up.alpha.transformer/+sv
+        (update :mock conj ["1" [2]] 3))) ;=> #'ti-yong.alpha.transformer/+sv
 
   (+sv "1" [2] 3 [4 5]) ;=> 15
   +sv
@@ -347,6 +347,6 @@
                              {:args (mapv str args)})))
         (update :mock conj ["1" [2]] 3))) ;=> :repl/exception!
   ; Execution error (ExceptionInfo) at (<cljs repl>:1).
-  ; Failure in :step-up.alpha.transformer/+sv with mock inputs [1 "2" 3 4 "5" 6] when expecting 21 but actually got "123456"
+  ; Failure in :ti-yong.alpha.transformer/+sv with mock inputs [1 "2" 3 4 "5" 6] when expecting 21 but actually got "123456"
 
   :end)

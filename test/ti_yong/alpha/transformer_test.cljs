@@ -1,11 +1,11 @@
-(ns step-up.alpha.transformer-test
+(ns ti-yong.alpha.transformer-test
   (:require
    [clojure.edn :as edn]
    [clojure.spec.alpha :as s]
    [clojure.test :refer [deftest is]]
-   [step-up.alpha.dyna-map :as dm]
-   [step-up.alpha.transformer :as t]
-   [step-up.alpha.util :as u]))
+   [ti-yong.alpha.dyna-map :as dm]
+   [ti-yong.alpha.transformer :as t]
+   [ti-yong.alpha.util :as u]))
 
 (deftest root-call-arities-test
   (is (= nil (t/transformer)))
@@ -194,25 +194,25 @@
         y (with-transformer-for-spec :y ::y 8 ::y-spec a b c x)
         z (with-transformer-for-spec :z ::z 9 ::z-spec y)
         r (with-transformer-for-spec :r ::r 10 ::r-spec c z)]
-    (is (= {:failed ":step-up.alpha.transformer-test/a-spec (cljs.core/fn [%] (cljs.core/contains? % :a))"}
+    (is (= {:failed ":ti-yong.alpha.transformer-test/a-spec (cljs.core/fn [%] (cljs.core/contains? % :a))"}
            (try (dissoc a :a)
                 (catch :default e
                   {:failed (->> e str (drop 7) (apply str))}))))
 
-    (is (= {:failed ":step-up.alpha.transformer-test/a-spec (cljs.core/fn [%] (cljs.core/contains? % :a))"}
+    (is (= {:failed ":ti-yong.alpha.transformer-test/a-spec (cljs.core/fn [%] (cljs.core/contains? % :a))"}
            (try (dissoc x :a)
                 (catch :default e
                   {:failed (->> e str (drop 7) (apply str))}))))
-    (is (= {:failed ":step-up.alpha.transformer-test/x-spec (cljs.core/fn [%] (cljs.core/contains? % :x))"}
+    (is (= {:failed ":ti-yong.alpha.transformer-test/x-spec (cljs.core/fn [%] (cljs.core/contains? % :x))"}
            (try (dissoc x :x)
                 (catch :default e
                   {:failed (->> e str (drop 7) (apply str))}))))
 
-    (is (= {:failed ":step-up.alpha.transformer-test/a-spec (cljs.core/fn [%] (cljs.core/contains? % :a))"}
+    (is (= {:failed ":ti-yong.alpha.transformer-test/a-spec (cljs.core/fn [%] (cljs.core/contains? % :a))"}
            (try (dissoc r :a)
                 (catch :default e
                   {:failed (->> e str (drop 7) (apply str))}))))
-    (is (= {:failed ":step-up.alpha.transformer-test/r-spec (cljs.core/fn [%] (cljs.core/contains? % :r))"}
+    (is (= {:failed ":ti-yong.alpha.transformer-test/r-spec (cljs.core/fn [%] (cljs.core/contains? % :r))"}
            (try (dissoc r :r)
                 (catch :default e
                   {:failed (->> e str (drop 7) (apply str))}))))))
@@ -264,7 +264,7 @@
                              {:args args})))
         (assoc :mock [[1 "2" 3 4 "5" 6] 21])))
 
-  (step-up.alpha.dyna-map/get-methods +s)
+  (ti-yong.alpha.dyna-map/get-methods +s)
   (+s 100 1)
 
   (defn vecs->ints [& s]
@@ -277,7 +277,7 @@
                 ::+sv
                 #%(merge % (when-let [args (apply vecs->ints %:args)]
                              {:args args})))
-        (update :mock conj ["1" [2]] 3))) ;=> #'step-up.alpha.transformer/+sv
+        (update :mock conj ["1" [2]] 3))) ;=> #'ti-yong.alpha.transformer/+sv
 
   (+sv "1" [2] 3 [4 5]) ;=> 15
   +sv
@@ -291,7 +291,7 @@
                              {:args (mapv str args)})))
         (update :mock conj ["1" [2]] 3))) ;=> :repl/exception!
   ; Execution error (ExceptionInfo) at (<cljs repl>:1).
-  ; Failure in :step-up.alpha.transformer/+sv with mock inputs [1 "2" 3 4 "5" 6] when expecting 21 but actually got "123456"
+  ; Failure in :ti-yong.alpha.transformer/+sv with mock inputs [1 "2" 3 4 "5" 6] when expecting 21 but actually got "123456"
 
   :end)
   

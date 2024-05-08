@@ -1,10 +1,10 @@
-(ns step-up.alpha.user
+(ns ti-yong.alpha.user
   (:require
    [cljs.math :as math]
    [clojure.edn :as edn]
-   [step-up.alpha.dyna-map :as dm :refer [dyna-map]]
-   [step-up.alpha.root :as r :refer [root]]
-   [step-up.alpha.transformer :refer [transformer]]
+   [ti-yong.alpha.dyna-map :as dm :refer [dyna-map]]
+   [ti-yong.alpha.root :as r :refer [root]]
+   [ti-yong.alpha.transformer :refer [transformer]]
    [perc.core] ; <- adds #%( ... %:some-key ...) anonymous fn syntax sugur
    [clojure.spec.alpha :as s]))
 
@@ -66,7 +66,7 @@
         (update :tf conj
                 ::t1 #(-> % (assoc :hello :world)))))
 
-  t1 ;=> {:args [], :tf-pre [], :step-up.alpha.dyna-map/tform-pre #object [step-up$alpha$root$preform], :step-up.alpha.dyna-map/outs ...
+  t1 ;=> {:args [], :tf-pre [], :ti-yong.alpha.dyna-map/tform-pre #object [ti-yong$alpha$root$preform], :ti-yong.alpha.dyna-map/outs ...
   (t1 1) ;=> 1
 
   ;;
@@ -208,7 +208,7 @@
   (shape {:radius 20}) ;=> nil
  ; no matching method for {:radius 20} 
  ; in multi function ancestry:
- ;  [:step-up.alpha/root :step-up.alpha/transformer :dev.user/ancestral :dev.user/shape]
+ ;  [:ti-yong.alpha/root :ti-yong.alpha/transformer :dev.user/ancestral :dev.user/shape]
 
  ;; Now that we have a `shape` we can create chains hierarchically:
 
@@ -227,7 +227,7 @@
   (box {:wd 12 :ht 12}) ;=> nil
  ; no matching method for {:wd 12, :ht 12} 
  ; in multi function ancestry:
- ;  [:step-up.alpha/root :step-up.alpha/transformer :dev.user/ancestral :dev.user/shape :dev.user/box]
+ ;  [:ti-yong.alpha/root :ti-yong.alpha/transformer :dev.user/ancestral :dev.user/shape :dev.user/box]
 
  ;; We can simulate a 2D space with a box by keeping the length dimension as 1.
 
@@ -253,7 +253,7 @@
   (box {:wd 5 :ht 5}) ;=> nil
  ; no matching method for {:wd 5, :ht 5} 
  ; in multi function ancestry:
- ;  [:step-up.alpha/root :step-up.alpha/transformer :dev.user/ancestral :dev.user/shape :dev.user/box]
+ ;  [:ti-yong.alpha/root :ti-yong.alpha/transformer :dev.user/ancestral :dev.user/shape :dev.user/box]
 
  ;; For `square`, let's add a new dispatch:
 
@@ -276,7 +276,7 @@
   (square {:wd 5 :height 2 :ln 5}) ;=> nil
  ; no matching method for {:wd 5, :height 2, :ln 5} 
  ; in multi function ancestry:
- ;  [:step-up.alpha/root :step-up.alpha/transformer :dev.user/ancestral :dev.user/shape :dev.user/box :dev.user/rect :dev.user/square]
+ ;  [:ti-yong.alpha/root :ti-yong.alpha/transformer :dev.user/ancestral :dev.user/shape :dev.user/box :dev.user/rect :dev.user/square]
 
  ;; Let's add a `cube` implementation off of box:
 
@@ -320,12 +320,12 @@
   (circle {:wd 5 :ht 5 :ln 3}) ;=> nil
  ; no matching method for {:wd 5, :ht 5, :ln 3} 
  ; in multi function ancestry:
- ;  [:step-up.alpha/root :step-up.alpha/transformer :dev.user/ancestral :dev.user/shape :dev.user/circle]
+ ;  [:ti-yong.alpha/root :ti-yong.alpha/transformer :dev.user/ancestral :dev.user/shape :dev.user/circle]
 
   (circle {:size 2}) ;=> nil
  ; no matching method for {:size 2} 
  ; in multi function ancestry:
- ;  [:step-up.alpha/root :step-up.alpha/transformer :dev.user/ancestral :dev.user/shape :dev.user/circle]
+ ;  [:ti-yong.alpha/root :ti-yong.alpha/transformer :dev.user/ancestral :dev.user/shape :dev.user/circle]
 
   (circle {:radius 17.001}) ;=> 908.0270941792651
 

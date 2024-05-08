@@ -6,4 +6,4 @@
    :output-dir "out"
    :modules
    {:client
-    {:init-fn step-up.alpha.user/main}}}}}
+    {:init-fn ti-yong.alpha.user/main}}}}}

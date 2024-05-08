@@ -1,9 +1,9 @@
-(ns step-up.alpha.root-test
+(ns ti-yong.alpha.root-test
   (:require
    [clojure.test :refer [deftest is]]
-   [step-up.alpha.dyna-map :as dm]
-   [step-up.alpha.root :as r]
-   [step-up.alpha.util :as u]))
+   [ti-yong.alpha.dyna-map :as dm]
+   [ti-yong.alpha.root :as r]
+   [ti-yong.alpha.util :as u]))
 
 (deftest root-call-arities-test
   (is (= nil (r/root)))
