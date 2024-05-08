@@ -711,7 +711,7 @@
       (-> data
           (update :in conj parse-c)
           (assoc :op fahrenheit)
-          (update :tf-end conj #(assoc % :res (str (:res %) "F")))))) ;=> -75
+          (update :tf-end conj #(assoc % :res (str (:res %) "F")))))) ;=> "-75f"
 
 ;; Now, let's define f2 again but, this time, lets store the function as data:
 (def f-with-parse ;; was f2

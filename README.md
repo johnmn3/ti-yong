@@ -173,9 +173,9 @@ graph looks like this:
 ```
 Notice, the only genuinely new code in the new tree is in C2 and K2.
 
-D1, E1, F1, G1, H1, I1, J1 and K1 all needed to be recomposed into two separate
+D, E, F, G, H, I and J all needed to be recomposed into two separate
 call trees, bloating code with technical debt. If there's ever a bug in the way
-G1 called D1, for instance, we'll now have to remember to go back and fix it in
+G called D, for instance, we'll now have to remember to go back and fix it in
 two different places.
 
 Looking at the graph like this, we might get the impression that managing this
@@ -207,7 +207,7 @@ the call tree between C and K.
                                     | \      
                                     K  k2    
 ```
-We are not _mutating_ here. When K2 is defined, two different logical call
+We are not _mutating_ here. When K2 is defined, two different _logical_ call
 trees are created, similar to how `(def a {:a 1})` and `(def b (assoc a :b 1)`
 are two different logical maps that share implementation structure between
 them.
@@ -301,10 +301,9 @@ So Bob did the logical thing and just wrapped it:
 
 There. Now all existing callers can continue to function and look as they
 are and only new widgets that the higherups need the new behavior in can
-depend on the newly wrapped funciton. That's normally how we reuse
+depend on the newly wrapped function. That's normally how we reuse
 implementation details in functional programming - we wrap it in another
-function. This is called the "legos method" of code reuse. It has it's
-pros and cons, like all patterns.
+function. This is called the "legos method" of code reuse.
 
 But, uh oh, the higherups came back with another request...
 They wanted Bob to peg all inputs below 0 to 0 now. They say it's for
@@ -315,7 +314,7 @@ zero celsius.
 people."
 
 Against Bob's better judgement, he went and made the thing that can't
-calculate temperature correctly. But he now he had a problem.
+calculate temperature correctly. But now he had a problem.
 
 In the time between their previous request and this one, both the original
 farenheit and the f2 versions of the calculator have ended up in twice as
@@ -354,7 +353,7 @@ back with another request. They say that some customers say that they only
 want even significand (to the left of the decimal) outputs, otherwise they'd
 like to have 1 added to the output.
 
-Weird flex, but okay, right? Thinks stopped making sense a long time ago, as
+Weird flex, but okay, right? Things stopped making sense a long time ago, as
 far as Bob was concerned. Again, since our new f3 has been created, Terry
 has added 23 widgets that depend on it. And, again, we don't need to risk
 breaking those downstream consumers of f3, so Bob can just make an f3-even,
@@ -426,7 +425,7 @@ have to make a new f2? And do we also have to make a new f3, so that we
 can have a new f3-even?
 
 Bob ponders parameterizing the parser. Again, he sees no point in risking
-damange to downstream callers of f3 and f3-even, so he implements fresh,
+damage to downstream callers of f3 and f3-even, so he implements fresh,
 bespoke versions of f3 and f3-even with the parser parameterized:
 ```clojure
 (defn f3-with-parser [c & [parser]]
@@ -698,68 +697,26 @@ wrappers, things become _less_ complex with Transformers:
   (-> f-with-parse-and-cond
       (update :out conj #(if (even? (int %)) % (inc %)))))
 ```
-#### _Implementation diagram so far:_
+
+#### Implementation diagram so far
 ```clojure
-;; fahrenheit    parse-c                                    
-;;           \  /                                           
-;;        f-with-parse ----- f-with-parse-and-cond -- f4*   
+fahrenheit-1  parse-c-1                                  
+          \  /                                           
+       f-with-parse-1 ----- f-with-parse-and-cond -- f4*  
 ```
+
 Well, that was easy. We didn't have to go reimplementing f2 and f3 all over
-again!
+again! And, instead of overloading f4 with more and more parameterization,
+f4*'s whole ancestry are fully pre-parameterized by storing implementations
+in data that can be hooked into. No need for all these extra params
+`& [parser conditional-fn dunzo]`.
 
 Works the same:
 ```clojure
 (abstract-function f4* "-103c") ;=> "-16.77777777777778F"
 ```
-
-All the other modifications and expansions we made to f4* in our original
-example are no longer necessary.
-
-Because `f3-with-parser`, `f3-even-with-parser`,
-`f3-with-parser-and-conditional`, `f3-even-with-parser-and-conditional` and
-`f4*` all simply parameterize implementation details for their callers, we no
-longer need to write those implementations.
-
-Therefore, what was:
-```clojure
-(f3-even-with-parser "104C" parse-C) ;=> "40f"
-```
-Becomes:
-```clojure
-(-> f-with-parse
-    (update :in #(-> % rest (conj parse-C))
-    (abstract-function "-103c")) ;=> "40f"
-```
-Or, if we don't mind expanding our implementation diagram:
-```clojure
-(def f3-even-with-parser
-  (-> f-with-parse
-      (update :in #(-> % rest (conj parse-C)))
-#_ (abstract-function f3-even-with-parser "-103c") ;=> "40f"
-```
-#### _Implementation diagram so far:_
-```clojure
-;; fahrenheit    parse-c                                  
-;;           \  /                                         
-;;        f-with-parse ----- f-with-parse-and-cond -- f4*  
-;;                    \_____ f3-even-with-parser          
-```
-
-Still quite simple.
-
-Here were are anonymously implementing `f4*` inline:
-<!-- conditional dunzo -->
-```clojure
-(-> f3-even-with-parser
-    (assoc :conditional #(< 40 %))
-    (assoc :dunzo #(if (even? (int %)) % (inc %))
-    (update :tf-end conj #())
-    (abstract-function "-103c")) ;=> "40f"
-```
-(f4* 104 parse-C #(< 40 %) #(if (even? (int %)) % (inc %)))
-
 Notice how we never had to go back and rewrite old functions, parameterizing
-behaviors we didn't anticipate at the design stage.
+behaviors we didn't anticipate at design stage.
 
 The f4* function fully reuses the f-with-parse-and-cond function. The
 f-with-parse-and-cond function fully reuses the f-with-parse function.
@@ -767,7 +724,7 @@ f-with-parse-and-cond function fully reuses the f-with-parse function.
 Oh, but we need a version of f4* that doesn't convert the result to a string
 with "f" at the end!
 
-How hard would it be for us to transform f4* into on that acts as if
+How hard would it be for us to transform f4* into a function that acts as if
 f-with-parse never coupled the formating behavior in its implementation?
 
 Pretty easy!
@@ -791,37 +748,6 @@ provide a way to more easily compose functions and declaratively recompose
 them after they've already been defined. They parameterize every part of the
 insides of a function, turning its semantics inside out, so that those 
 implementation parts are not coupled together by the function closure.
-
-Transformers allow you to share implementation without forcing
-specific abstractions. It's an abstract function, so your code doesn't
-have to be.
-
-People are complaining that "reusable" code is problematic.
-
-“duplication is far cheaper than the wrong abstraction” they say
-“prefer duplication over the wrong abstraction” they say
-
-The main method of implementation reuse in clojure is by convention of making
-small, single purpose functions. We make small lego blocks out of functions
-that can be easily composed together to create any large scale behavior
-we want.
-
-This has one downside though - while it's easy to swap out one function
-anywhere in an heirarchy of functions composed together with another
-function with the new feature, we still have to recompose the entire
-heirarchy downstream of the new function. Easy to do - you can essentially
-copy and paste the same composition logic downstream of the new function.
-
-In other words, for function C in A->B->C->D->E, if we need a new E that
-needs a new feature from C, then when we go to make a new C we have to also
-go make a new D that wraps the new C, so that the new E can wrap the new
-D.
-
-So, we're not really getting to reuse D in this new C/new D relationship.
-Technically, there's no reason we should have to rewrite all the wrappers
-between a new function and an old one that is getting a new feature. We
-can't do that though, because by "closing over" our implementations we are
-preventing the sharing of their compositions. 
 </details>
 
 ##  Prior Art
