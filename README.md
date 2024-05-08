@@ -873,6 +873,7 @@ Transformers are doing for functions what Interceptors did for Ring.
 
 Special thanks to [Adrian Smith](https://clojurians.slack.com/team/U7RJTCH6J),
 [Alex Miller](https://github.com/puredanger),
+[didibus](https://clojurians.slack.com/team/U0K064KQV),
 [Lidor Cohen](https://clojurians.slack.com/team/U8RHR1V60),
 [Ghadi Shayban](https://clojurians.slack.com/team/U050ECB92),
 [Ludger Solbach](https://clojurians.slack.com/team/U017HM6BG07)
