@@ -750,6 +750,70 @@ insides of a function, turning its semantics inside out, so that those
 implementation parts are not coupled together by the function closure.
 </details>
 
+## Transformer Map Keys (Data API) (In Brief)
+
+The transformer environment map is a data structure that contains various
+keys to control the behavior of the transformer function. Here is a
+description of each key:
+
+- `:with`: A vector of transformers to be mixed in to the current transformer
+being defined.
+
+- `:specs`: A vector of specs that will be used to validate future
+transformations of the transformer.
+
+- `:id`: A vector of ids uniquely naming the transformers that this transformer
+was derived from.
+
+- `:tf-pre`: A vector of id/transform pairs. These transforms are called every
+time the transformer is transformed into a new transformer. `:specs` is built
+on top of `:tf-pre`. The `:tf-pre` transforms take an environment map and
+return a new enviornment map. This allows us you to react to changes to the
+transformer while it's being constructed, before it is invoked.
+
+- `:in`: A vector of id/transform pairs. The transform takes an environment map
+and a sequence of arguments. Results of `:in` transforms replace the `:args`
+key in the environment map.
+
+- `:args`: A sequence of zero or more values supplied to the transformer during
+invocation and provided to `:in`, the result of which replaces `:args`. `:args`
+are then added back into the environment and can be updated by the `:tf`
+transform prior to being provided to the `:op`.
+
+- `:tf`: A vector of id/transform pairs. The transform takes an environment
+map that has the latest `:args` pre-processed by `:in` transforms. `:tf`
+transforms have the opportunity to use `:args` and any other data in the
+environment and return an entire new environment before either `:op` or
+`:op-env` are run.
+
+- `:op`: A function that will perform the main computation of the transformer.
+Takes `:args` after they have been processed by `:in` and `:tf` transforms. The
+results of this invocation are placed in the `:res` key of the environment.
+
+- `:env-op`: If present, takes precedence over `:op`. Works like `:op` but
+takes the environment (with the current `:args` in it) rather than just the
+`:args` as its only argument.
+
+- `:res` The return value of either `:op` or `:env-op`. Gets replaced by the
+results of `:out` transforms.
+
+- `:out` A vector of id/transform pairs. These transforms receive the
+environment and the `:res` value produced by `:op` or `:env-op` and the results
+are placed back into the `:res` key of the environment map.
+
+- `:tf-end` A vector of id/transform pairs. These transforms receive the
+environment with the `:res` value already updated by the `:out` transforms in
+it. These transforms have the opportunity to take any final actions based on
+the `:res` and other data in the environment, prior to the `:res` being
+returned to the caller of the transformer.
+
+(more docs / a guide on how to do transformations and best practices will be
+forthcoming)
+
+## Running Tests
+
+To run the tests for this project just run `clojure -A:test`.
+
 ##  Prior Art
 
 **CLOS Generic Functions:** Transformers' function hooks have similarity
@@ -817,3 +881,16 @@ Special thanks to [Adrian Smith](https://clojurians.slack.com/team/U7RJTCH6J),
 and others for discussing (though not necessarily endorsing) this idea on
 [Clojurians slack](https://app.slack.com/client/T03RZGPFR).
 
+## Contributing
+
+We welcome contributions to this project! There are two ways you can contribute:
+
+1. **Contribute to this project**: If you have ideas for improving the existing code or adding new features, you can directly contribute to this project. Simply fork the repository, make your changes, and submit a pull request.
+
+2. **Create your own transformer**: If you want to explore the concept of transformers further and build your own implementation, you can fork this project and create your own transformer or define your own root semantics. Perhaps an environment based on an in-memory db like [entity-graph](https://github.com/geodrome/entity-graph) would be an interesting exploration - lots of possibilities here.
+
+We encourage you to explore the possibilities and share your ideas with the community. Together, we can push the boundaries of functional programming and data-oriented approaches!
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
