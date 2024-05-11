@@ -77,7 +77,7 @@ dependency to your `deps.edn` file:
 
 (def add-and-inc
   (-> add
-      (update :out conj inc)))
+      (update :out conj ::add-and-inc inc)))
 
 (add-and-inc 2 2) ;=> 5
 ```
