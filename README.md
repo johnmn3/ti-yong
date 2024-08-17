@@ -604,7 +604,7 @@ function stages that we've been discussing:
                      (reduce (fn [a f] [(apply f a)])
                      args (:in d)))
         envb (apply-env-fns enva :tf)
-        res (if-not ((:op envb))
+        res (if-not (:op envb)
                 (:args envb)
                 (apply (:op envb) (:args envb)))
         envc (assoc d :res (reduce (fn [r f] (f r))
