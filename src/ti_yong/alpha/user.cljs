@@ -148,6 +148,15 @@
   (area c) ;=> 452.3893421169302
   (area {}) ;=> :oops
 
+  (def add
+    (-> transformer
+        (assoc :op +)))
+
+  (add 2 2) ;=> 4
+  (def add-and-inc
+    (-> add
+        (update :out conj ::add-and-inc inc)))
+  (add-and-inc 2 2) ;=> 5
 
  ;; Stateful Transformers
 
@@ -329,7 +338,8 @@
 
   (circle {:radius 17.001}) ;=> 908.0270941792651
 
-  :end)
+  :end
+  )
 
 
 ;; Bob works at Acme Widgets as a Staff Engineer in the Weather Widgets

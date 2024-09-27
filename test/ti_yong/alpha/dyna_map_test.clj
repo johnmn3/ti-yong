@@ -3,8 +3,9 @@
    [clojure.test :refer [deftest is]]
    [ti-yong.alpha.dyna-map :as dm]))
 
+
 (deftest dyna-map-build-test
-  (is (= dm/PersistentDynamicMap (type (dm/dyna-map))))
+  (is (= (type dm/empty-dyna-map) (type (dm/dyna-map))))
   (is (= {:a 1, :b 2} (dm/dyna-map :a 1, :b 2)))
   (is (= {:a 1, :b 2} (dm/dyna-map :b 2, :a 1)))
   (is (= {:a 1, :b 2, :c 3} (dm/dyna-map :a 1, :b 2, :c 3)))
@@ -13,26 +14,26 @@
   (is (= {:a 1, :b 2, :c 3} (dm/dyna-map :b 2, :c 3, :a 1))))
 
 (deftest dyna-map-arity-test
-  (is (= "Error: Invalid arity: 0"
-         (try ((dm/dyna-map)) (catch :default e (str e)))))
+  (is (= "clojure.lang.ExceptionInfo: No default invoke added {:args nil, :env {:fcoll {}, :ti-yong.alpha.dyna-map/methods {}, :instantiated? true}}"
+         (try ((dm/dyna-map)) (catch Exception e (str e)))))
   (is (= 1 ((dm/dyna-map :a 1) :a)))
   (is (= nil ((dm/dyna-map :a 1) :b)))
-  (is (= "Error: Invalid arity: 3"
-         (try ((dm/dyna-map) 1 2 3) (catch :default e (str e)))))
-  (is (= "Error: Invalid arity: 4"
-         (try ((dm/dyna-map) 1 2 3 4) (catch :default e (str e))))))
+  (is (= "clojure.lang.ExceptionInfo: No default invoke added {:args (1 2 3), :env {:fcoll {}, :ti-yong.alpha.dyna-map/methods {}, :instantiated? true}}"
+         (try ((dm/dyna-map) 1 2 3) (catch Exception e (str e)))))
+  (is (= "clojure.lang.ExceptionInfo: No default invoke added {:args (1 2 3 4), :env {:fcoll {}, :ti-yong.alpha.dyna-map/methods {}, :instantiated? true}}"
+         (try ((dm/dyna-map) 1 2 3 4) (catch Exception e (str e))))))
 
 (deftest dyna-map-assoc-dissoc-test
   (is (= {:a 1, :b 2} (assoc (dm/dyna-map :a 1) :b 2)))
-  (is (= dm/PersistentDynamicMap
+  (is (= (type dm/empty-dyna-map)
          (type (assoc (dm/dyna-map :a 1) :b 2))))
-  
+
   (is (= {:a 1} (dissoc (dm/dyna-map :a 1 :b 2) :b)))
-  (is (= dm/PersistentDynamicMap
+  (is (= (type dm/empty-dyna-map)
          (type (dissoc (dm/dyna-map :a 1 :b 2) :b))))
 
   (is (= {:a 1, :b 2} (merge (dm/dyna-map :a 1) {:b 2})))
-  (is (= dm/PersistentDynamicMap
+  (is (= (type dm/empty-dyna-map)
          (type (merge (dm/dyna-map :a 1) {:b 2})))))
 
 (deftest dyna-map-conj-test
@@ -136,3 +137,30 @@
     (is (and (= 2 ai2) (= 1 ao2)))
     (is (and (= 2 ai3) (= 1 ao3)))
     (is (and (= 2 ai4) (= 1 ao4)))))
+
+(deftest test-dyna-map-methods
+  (let [dm (dm/->DynamicMap {:a 1 :b 2} {::dm/dyna-invoke (fn [_env & args] (apply + args))})]
+
+    (is (dm/contains-method? dm ::dm/dyna-invoke) "Should contain ::dyna-invoke method")
+    (is (not (dm/contains-method? dm :non-existent)) "Should not contain :non-existent method")
+
+    (is (fn? (dm/method dm ::dm/dyna-invoke)) "::dyna-invoke method should be a function")
+    (is (nil? (dm/method dm :non-existent)) "Non-existent method should return nil")
+
+    (let [methods (dm/get-methods dm)]
+      (is (map? methods) "get-methods should return a map")
+      (is (contains? methods ::dm/dyna-invoke) "Methods should contain ::dyna-invoke"))
+
+    (let [new-methods {::new-method (fn [] "new")}
+          updated-dm (dm/set-methods dm new-methods)]
+      (is (dm/contains-method? updated-dm ::new-method) "Should contain new method after set-methods")
+      (is (not (dm/contains-method? updated-dm ::dm/dyna-invoke)) "Should not contain old method after set-methods"))
+
+    (is (= {:a 1 :b 2} (dm/get-coll dm)) "get-coll should return the underlying collection")
+
+    (let [updated-dm (dm/dissoc-method dm ::dm/dyna-invoke)]
+      (is (not (dm/contains-method? updated-dm ::dm/dyna-invoke)) "Method should be removed after dissoc-method"))
+
+    (let [updated-dm (dm/assoc-method dm ::new-method (fn [] "new"))]
+      (is (dm/contains-method? updated-dm ::new-method) "New method should be added after assoc-method")
+      (is (= "new" ((dm/method updated-dm ::new-method))) "New method should be callable"))))

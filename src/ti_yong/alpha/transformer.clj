@@ -49,7 +49,6 @@
 (s/def ::transformer
   (s/keys :opt-un [::specs ::with ::id]))
 
-;; todo: allow doc strings, metadata and more traditional options from functions
 (def transformer
   (-> r/root
       (update :id conj ::transformer)
@@ -63,12 +62,13 @@
                     (doseq [spec (map second s)]
                       (when-not (s/valid? spec env)
                         (throw
-                         (js/Error. (->> env ;; <- use ex-data/ex-info here?
-                                         (s/explain-data spec)
-                                         :cljs.spec.alpha/problems
-                                         first
-                                         :pred
-                                         (str spec " "))))))
+                         (let [error-str (->> env ;; <- use ex-data/ex-info here?
+                                              (s/explain-data spec)
+                                              :cljs.spec.alpha/problems
+                                              first
+                                              :pred
+                                              (str spec " "))]
+                           (ex-info error-str {:error error-str :env env :spec spec})))))
                     (assoc env :specs (vec (mapcat identity s))))))
               ::with
               (fn with-tf [{:as env :keys [with]}]
@@ -76,12 +76,15 @@
                   env
                   (let [separated (->> with reverse (mapcat #(do [(last (:id %)) %])) (apply separate))
                         specs (:specs env [])
+                        seconds (->> separated
+                                     (partition 2)
+                                     (mapv #(second %))
+                                     (cons (dissoc env :with :specs))
+                                     vec)
+                        combined (apply combine seconds)
                         merges  (if-not (seq separated)
                                   env
-                                  (->> separated
-                                       (partition 2)
-                                       (mapv #(second %))
-                                       (#(apply combine (into % [(dissoc env :with :specs)])))))
+                                  combined)
                         merges (-> merges
                                    (update :id (comp vec distinct)))]
                     (update merges :specs into specs)))))))
@@ -109,9 +112,12 @@
   #_(dissoc a :a) ;=> :repl/exception!
   ; Execution error (Error) at (<cljs repl>:1).
   ; :ti-yong.alpha.transformer/a-spec
-  
+
   (s/def ::b int?)
   (s/def ::b-spec (s/keys :req-un [::b]))
+  (assoc transformer :with [:hi])
+  (assoc transformer :with [])
+  (update transformer :with #(do (println :1 %1 :type-2 (type %2) :2 %2) (vec (conj %1 %2))) a)
   (def b
     (-> transformer
         (update :id conj ::b)
@@ -177,7 +183,7 @@
   #_z
 
   (s/def ::r int?)
-  (s/def ::r-spec (s/keys :req-un [::r])) 
+  (s/def ::r-spec (s/keys :req-un [::r]))
   (def r
     (-> b
         (update :id conj ::r)
@@ -188,17 +194,18 @@
   #_(= (:specs r)
        [:ti-yong.alpha.transformer/transformer :ti-yong.alpha.transformer/transformer :ti-yong.alpha.transformer/a :ti-yong.alpha.transformer/a-spec :ti-yong.alpha.transformer/b :ti-yong.alpha.transformer/b-spec :ti-yong.alpha.transformer/c :ti-yong.alpha.transformer/c-spec :ti-yong.alpha.transformer/x :ti-yong.alpha.transformer/x-spec :ti-yong.alpha.transformer/y :ti-yong.alpha.transformer/y-spec :ti-yong.alpha.transformer/z :ti-yong.alpha.transformer/z-spec :ti-yong.alpha.transformer/r :ti-yong.alpha.transformer/r-spec])
 
-  (= {:failed ":ti-yong.alpha.transformer/a-spec (cljs.core/fn [%] (cljs.core/contains? % :a))"}
+  (= {:failed "clojure.lang.ExceptionInfo: :ti-yong.alpha.transformer/a-spec"}
      (try (dissoc r :a)
-          (catch :default e
-            {:failed (->> e str (drop 7) (apply str))})))
+          (catch Exception e
+            {:failed (->> e str (take 61) (apply str))})))
 
-  (= {:failed ":ti-yong.alpha.transformer/x-spec (cljs.core/fn [%] (cljs.core/contains? % :x))"}
+  (= {:failed "clojure.lang.ExceptionInfo: :ti-yong.alpha.transformer/x-spec"}
      (try (dissoc r :x)
-          (catch :default e
-            {:failed (->> e str (drop 7) (apply str))})))
+          (catch Exception e
+            {:failed (->> e str (take 61) (apply str))})))
 
   r
+  (:id r)
   (= :root|transformer|a|b|c|x|y|z|r
      (->> r :id (mapv name) (interpose "|") (apply str) keyword))
 
@@ -230,7 +237,14 @@
            :tf     [::tf     (fn [x] (println :tf     x) x)]
            :out    [::out    (fn [x] (println :out    x) x)]
            :tf-end [::tf-end (fn [x] (println :tf-end x) x)]))
-
+  (def y
+    (assoc transformer
+           :op + :x 1 :y 2))
+  (def z (assoc y :z "z"))
+  (:z (merge y z)) ;=> "z"
+  (into y z)
+  (type (first y))
+  
   ;;  (fn [x] (println :tf 2 :x x) x)))
   ; constructor ; tran-map ; tfmr-map ; tform
   ; finally
@@ -242,11 +256,13 @@
   (apply x 1 [2])
   (x 1 2 4)
   (apply x 1 2 3 (range 25))
+  (apply y 1 2 3 (range 25))
   (apply x 1 (range 5))
 
   (def y (assoc x :a 1 :b 2))
   y
   (y 1 2)
+  (merge x y)
   (apply y 1 (range 5))
 
   (def z (assoc y :r 1 :k 2))
@@ -282,24 +298,24 @@
         (update :tf-pre conj
                 ::mocker
                 (fn [{:as env :keys [id mock mocks mocked instantiated?] :or {mocked #{} mocks [] mock []}}]
-                ;;   (println :mocker :instantiated? instantiated?)
                   (if (or (mocked id) instantiated? (not (seq mock)))
                     env
                     #_(assoc env
                             ;; :mocks (into mocks mock)
                              :mocked (disj mocked id))
-                    (let [;_ (println :running-mocker :for (last id))
-                          mocks (into mocks mock)
-                        ;;   _ (println :new-mocks mocks)
+                    (let [mocks (into mocks mock)
                           mocked (conj mocked id)
-                          this (-> env (dissoc :mock) (->> (merge transformer)))
+                          _ (println :mocks mocks :mocked mocked)
+                          mockless (dissoc env :mock)
+                          _ (println :mockless mockless)
+                          ;; this (merge transformer mockless)
+                          this (into transformer mockless)
+                          _ (println :this this)
                           failures (->> mocks
                                         (partition 2)
                                         (mapv (fn [[in* out*]]
                                                 (assert (coll? in*))
-                                                (let [;_ (println :in* in*)
-                                                      result (apply (dissoc this :args) in*)]
-                                                ;;   (println :res result)
+                                                (let [result (apply (dissoc this :args) in*)]
                                                   (when (and result (not= result out*))
                                                     (failure-message env in* out* result)))))
                                         (filter (complement nil?)))]
@@ -307,6 +323,7 @@
                         (->> failures (mapv (fn [er] (throw (ex-info (str er) {}))))))
                       (assoc env :mocked mocked :mocks mocks :mock [])))))))
 
+  (require '[clojure.edn :as edn])
   (defn strings->ints [& string-ints]
     (->> string-ints (map str) (mapv edn/read-string)))
 
@@ -317,8 +334,8 @@
         (update :with conj mocker)
         (update :tf conj
                 ::+s
-                #%(merge % (when-let [args (apply strings->ints %:args)]
-                             {:args args})))
+                #(merge % (when-let [args (apply strings->ints (% :args))]
+                            {:args args})))
         (assoc :mock [[1 "2" 3 4 "5" 6] 21])))
 
   (ti-yong.alpha.dyna-map/get-methods +s)
@@ -332,8 +349,8 @@
         (update :id conj ::+sv)
         (update :tf conj
                 ::+sv
-                #%(merge % (when-let [args (apply vecs->ints %:args)]
-                             {:args args})))
+                #(merge % (when-let [args (apply vecs->ints (% :args))]
+                            {:args args})))
         (update :mock conj ["1" [2]] 3))) ;=> #'ti-yong.alpha.transformer/+sv
 
   (+sv "1" [2] 3 [4 5]) ;=> 15
@@ -344,10 +361,11 @@
         (update :id conj ::+sv)
         (update :tf conj
                 ::+sv
-                #%(merge % (when-let [args (apply vecs->ints %:args)]
-                             {:args (mapv str args)})))
+                #(merge % (when-let [args (apply vecs->ints (% :args))]
+                            {:args (mapv str args)})))
         (update :mock conj ["1" [2]] 3))) ;=> :repl/exception!
   ; Execution error (ExceptionInfo) at (<cljs repl>:1).
   ; Failure in :ti-yong.alpha.transformer/+sv with mock inputs [1 "2" 3 4 "5" 6] when expecting 21 but actually got "123456"
 
   :end)
+  

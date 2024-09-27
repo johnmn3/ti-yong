@@ -19,3 +19,5 @@ pom.xml.asc
 .portal/
 .shadow-cljs/
 cljs-test-runner-out/
+.cljs_node_repl/
+.cursorignore

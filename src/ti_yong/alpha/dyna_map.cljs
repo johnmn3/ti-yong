@@ -13,8 +13,7 @@
     (if-let [diy-default-invoke (or (get-in env [::methods ::default-invoke])
                                     (get env ::default-invoke))]
       (apply diy-default-invoke env args)
-      (do (println :error :args args :env env)
-          (throw (js/Error. "No default invoke added"))))))
+      (throw (js/Error. "No default invoke added")))))
 
 (defn handle-invoke [env & args]
   (let [env (assoc (into {} env) :instantiated? true)]

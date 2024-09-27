@@ -4,8 +4,6 @@
    [clojure.spec.alpha :as s]
    [ti-yong.alpha.dyna-map :as dm
     :refer [dyna-map assoc-method]]))
-            ;; method contains-method? dissoc-method
-            ;; get-methods set-methods]]))
 
 (defn transformer-invoke [env & args]
   (let [args (concat (:args env) args)
@@ -62,7 +60,14 @@
 
 (defn preform [env]
   (when-not (s/valid? ::root env)
-    (throw (js/Error. (:cljs.spec.alpha/problems (s/explain-data ::root env)))))
+    (throw
+     (let [edata (s/explain-data ::root env)
+           problems (:clojure.spec.alpha/problems edata)]
+       (ex-info
+        (str "Invalid env: " (seq problems) "\n\n env:" env #_#_ " edata:" edata)
+        {:error :invalid-env
+         :problems problems
+         :env env}))))
   (let [tf-pre (:tf-pre env)
         initialized-set (or (get env :init-set) #{})
         meths (::dm/methods env)]
@@ -107,7 +112,6 @@
   (let [r (dyna-map
            :id [::root]
            :args []
-           ::tform-pre preform
            :tf-pre []
            ::ins ins
            :in []
@@ -116,85 +120,6 @@
            ::outs outs
            :out []
            ::tform-end endform
-           :tf-end [])]
+           :tf-end []
+           ::tform-pre preform)]
     (-> r (assoc-method ::dm/dyna-invoke transformer-invoke))))
-
-(comment
-  (require '[ti-yong.alpha.dyna-map :refer [contains-method? method get-methods]])
-
-  (dissoc root :args) ;=> :repl/exception!
-  (dyna-map :a 1) ;=> {:a 1}
-  (type (dyna-map :a 1)) ;=> ti-yong.alpha.dyna-map/PersistentDynamicMap
-  (contains-method? root ::dm/dyna-invoke)
-  (method root ::dm/dyna-invoke)
-  (get-methods root)
-  root
-  (root) ;=> nil
-  (type root) ;=> ti-yong.alpha.dyna-map/PersistentDynamicMap
-  (root 1) ;=> 1
-  (root :tf-pre) ;=> :tf-pre
-  (root :tf-pre-blah :not-found-here) ;=> (:tf-pre-blah :not-found-here)
-  (root 1 2 3) ;=> (1 2 3)
-  (apply root 1 [2 3]) ;=> (1 2 3)
-
-  (def r1 (-> root (assoc :op +)))
-  r1
-  (type r1) ;=>  ;=> ti-yong.alpha.dyna-map/PersistentDynamicMap
-  (r1) ;=> 0
-  (r1 1 2 3 4) ;= 10
-  (r1 1) ;=> 1
-  (r1 1 2 3 [4 5]) ;=> "6[4 5]" 
-  (apply r1 1 2 3 [4 5]) ;=> 15
-  (time (apply r1 1 2 3 (range 100000))) ;=> 4999950006
-  ; "Elapsed time: 12.000000 msecs"
-
-  (time (apply + 1 2 3 (range 100000))) ;=> 4999950006
-  ; "Elapsed time: 13.000000 msecs"
-
-  (def x
-    (assoc root
-           :op +
-          ;;  :x 1 :y 2))
-           :tf-pre [::x-tf-pre (fn [x] (println :x-tf-pre x) x)]
-           :in     [::x-in     (fn [x] (println :x-in     x) x)]
-           :tf     [::x-tf     (fn [x] (println :x-tf     x) x)]
-           :out    [::x-out    (fn [x] (println :x-out    x) x)]
-           :tf-end [::x-tf-end (fn [x] (println :x-tf-end x) x)]))
-
-  x
-  (type x) ;=> ti-yong.alpha.dyna-map/PersistentDynamicMap
-  (x) ;=> 0
-  (apply x [1]) ;=> 1
-  (apply x 1 [2]) ;=> 3
-  (x 1 2 4) ;=> 7
-  (apply x 1 2 3 (range 25)) ;=> 306
-  (apply x 1 (range 5)) ;=> 11
-
-  (def y (assoc x :a 1 :b 2))
-  y
-  (y 1 2) ;=> 3
-
-  (apply y 1 (range 5)) ;=> 11
-
-  (def z (assoc y :r 1 :k 2))
-  z
-  (z 1 2) ;=> 3
-  (apply z 1 (range 25)) ;=> 301
-
-  root
-  (root) ;=> nil
-  (def a+ (assoc root :op +)) ;=> #'ti-yong.alpha.pthm/a+
-  (apply a+ 1 2 [3 4]) ;=> 10
-
-  (def x+ (assoc a+ :x 1 :y 2))
-
-  x+
-  (type x+)
-  (x+) ;=> 0
-  (x+ 1) ;=> 1
-  (x+ 1 2) ;=> 3
-  (apply x+ 1 2 (range 23)) ;=> 256
-  (apply x+ 1 2 (range 2)) ;=> 4
-  (apply x+ [2 1]) ;=> 3
-
-  :end)
