@@ -604,13 +604,13 @@ function stages that we've been discussing:
                      (reduce (fn [a f] [(apply f a)])
                      args (:in d)))
         envb (apply-env-fns enva :tf)
-        res (if-not ((:op envb))
+        res (if-not (:op envb)
                 (:args envb)
                 (apply (:op envb) (:args envb)))
         envc (assoc d :res (reduce (fn [r f] (f r))
                                    res (:out envb)))
         envd (apply-env-fns envc :tf-end)]
-    (:res env4)))
+    (:res envd)))
 #_ (abstract-function (-> data (assoc :op +)) 1 2 3) ;=> 6
 ```
 Okay, so what we have here is a data model of a function. With it, we're able
