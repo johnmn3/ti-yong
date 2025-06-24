@@ -1,12 +1,16 @@
 (ns ti-yong.alpha.root-test
   (:require
    [clojure.test :refer [deftest is]]
-   [ti-yong.alpha.dyna-map :as dm]
    [ti-yong.alpha.root :as r]
-   [ti-yong.alpha.util :as u]))
+   [ti-yong.alpha.util :as u]
+   [com.jolygon.wrap-map :as w]))
 
 (deftest root-call-arities-test
+  ;; When r/root is called, transformer-invoke is executed.
+  ;; If :args is empty and no passed args, combined-args is empty.
+  ;; Default :op is u/identities. (u/identities) is nil.
   (is (= nil (r/root)))
+  ;; (r/root 1) -> combined-args is (1), (u/identities 1) is 1 (due to custom u/identities)
   (is (= 1 (r/root 1)))
   (is (= false (r/root false)))
   (is (= :anything-else (r/root :anything-else)))
@@ -14,17 +18,25 @@
   (is (= '(1 2 3) (r/root 1 2 3)))
   (is (= '(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21)
          (r/root 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21)))
-  (is (= '(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22)
-        (apply r/root 1 (range 2 23))))
-  (is (= (range 100)
-        (apply r/root 0 1 (range 2 100)))))
+  ;; (apply r/root 1 (range 2 23)) -> combined-args is (1 2 3 ... 22)
+  (is (= (cons 1 (range 2 23)) (apply r/root 1 (range 2 23))))
+  ;; (apply r/root 0 1 (range 2 100)) -> combined-args is (0 1 2 ... 99) which is (range 100)
+  (is (= (range 100) (apply r/root 0 1 (range 2 100)))))
 
 (deftest root-basic-test
-  (is (= (type dm/empty-dyna-map) (type r/root)))
+  ;; r/root is a wrap-map. We can check if it's a map.
+  (is (map? r/root))
+  ;; Invoking r/root with a map argument.
+  ;; (r/root {:b 2, :a 1}) -> combined-args is ({:b 2, :a 1})
+  ;; (u/identities {:b 2, :a 1}) is {:b 2, :a 1} (due to custom u/identities)
   (is (= {:a 1, :b 2} (r/root {:b 2, :a 1}))))
 
 (deftest root-op-test
-  (is (= 3 (-> r/root (assoc :op +) (apply [1 2]))))
+  ;; (apply (-> r/root (assoc :op +)) [1 2])
+  ;; transformer-invoke will receive (-> r/root (assoc :op +)) as env, and [1 2] as args list.
+  ;; combined-args will be [1 2].
+  ;; :op is +. (apply + [1 2]) is 3.
+  (is (= 3 (apply (-> r/root (assoc :op +)) [1 2])))
   (is (= -4 (-> r/root (assoc :op -) (apply [1 2 3]))))
   (is (= 24 (-> r/root (assoc :op *) (apply [1 2 3 4]))))
   (is (= 1/24 (-> r/root (assoc :op /) (apply [1 2 3 4]))))

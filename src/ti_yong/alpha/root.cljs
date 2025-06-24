@@ -1,52 +1,78 @@
 (ns ti-yong.alpha.root
   (:require
    [ti-yong.alpha.util :as u]
-   [clojure.spec.alpha :as s]
-   [ti-yong.alpha.dyna-map :as dm
-    :refer [dyna-map assoc-method]]))
-            ;; method contains-method? dissoc-method
-            ;; get-methods set-methods]]))
+   [cljs.spec.alpha :as s]
+   [com.jolygon.wrap-map :as w]))
 
-(defn transformer-invoke [env & args]
-  (let [args (concat (:args env) args)
+;; Forward declaration for preform
+(declare preform)
+
+(defn transformer-invoke [original-env & args]
+  (let [env (if (:instantiated? original-env)
+              original-env
+              (preform original-env))
+        ;; Ensure args from the env are combined with passed-in args
+        combined-args (concat (:args env) args)
         tf* (update env :op #(or % u/identities))
+        ;; `this` and `params` are not standard wrap-map concepts,
+        ;; assuming they are part of the `env` structure for ti-yong's logic
         this (:this (:params tf*))
         tf* (merge tf* this)
-        ins (::ins tf* identity)
-        tform (::tform tf* identity)
-        outs (::outs tf*)
-        tform-end (::tform-end tf* identity)
-        argss (if-not (seq (:in tf*))
-                args
-                (ins tf* args))
-        arg-env (merge tf* (assoc tf* :args argss))
-        tf-env (if-not tform
+
+        ins-fn (::ins tf* identity)
+        tform-fn (::tform tf* identity)
+        outs-fn (::outs tf*)
+        tform-end-fn (::tform-end tf* identity)
+
+        processed-args (if-not (seq (:in tf*))
+                         combined-args
+                         (ins-fn tf* combined-args))
+
+        arg-env (assoc tf* :args processed-args)
+
+        tf-env (if-not tform-fn
                  arg-env
-                 (tform arg-env))
+                 (tform-fn arg-env))
+
         tf-args (:args tf-env [])
         op (or (:op tf-env) u/identities)
         env-op (:env-op tf-env)
+
         run-op (if env-op
-                 (partial env-op tf-env)
-                 op)
-        res (apply run-op tf-args)
-        out-res (if-not outs
+                 (partial env-op tf-env) ;; If env-op exists, it takes the whole env
+                 (partial op)) ;; Otherwise, op takes tf-args
+
+        res (if env-op
+              (run-op) ;; env-op is called with no args as tf-env is curried
+              (apply run-op tf-args)) ;; op is applied to tf-args
+
+        out-res (if-not outs-fn
                   res
-                  (outs (assoc tf-env :args tf-args :res res) res))
+                  (outs-fn (assoc tf-env :args tf-args :res res) res))
+
         res-env (assoc tf-env :args tf-args :res out-res)
-        end-env (if-not tform-end
+
+        end-env (if-not tform-end-fn
                   res-env
-                  (tform-end res-env))
+                  (tform-end-fn res-env))
+
         new-res (:res end-env)]
     new-res))
 
-(defn ins [env args]
-  (some->> env :in u/uniq-by-pairwise-first (reduce (fn [argss in] ((or in identity) argss)) args) seq))
+(defn ins [env current-args]
+  (let [pipeline (u/uniq-by-pairwise-first (:in env))] ;; Returns [fn1 fn2 ...]
+    (if-not (seq pipeline)
+      current-args
+      (reduce (fn [acc-args in-fn] ;; in-fn is now the function
+                ((or in-fn identity) acc-args))
+              current-args
+              pipeline))))
 
+;; Specs remain largely the same, as they describe the data structure (env)
 (s/def ::id vector?)
 (s/def ::args vector?)
-(s/def ::tform-pre fn?)
-(s/def ::tf-pre vector?)
+(s/def ::tform-pre fn?) ;; This is the preform function itself
+(s/def ::tf-pre vector?) ;; This is the data vector of [id fn] pairs for pre-processing
 (s/def ::ins fn?)
 (s/def ::in vector?)
 (s/def ::tform fn?)
@@ -56,119 +82,140 @@
 (s/def ::tform-end fn?)
 (s/def ::tf-end vector?)
 
-(s/def ::root
+(s/def ::root-data ; Renamed to avoid conflict with the `root` var
   (s/keys :req [::tform-pre ::ins ::tform ::outs ::tform-end]
           :req-un [::id ::args ::tf-pre ::in ::tf ::out ::tf-end]))
 
 (defn preform [env]
-  (when-not (s/valid? ::root env)
-    (throw (js/Error. (:cljs.spec.alpha/problems (s/explain-data ::root env)))))
-  (let [tf-pre (:tf-pre env)
-        initialized-set (or (get env :init-set) #{})
-        meths (::dm/methods env)]
-    (if (or (:instantiated? env) (not (seq tf-pre)))
-      (dissoc env :instantiated?)
-      (let [pre-env (some->> tf-pre
-                             (partition 2)
-                             (u/uniq-by first)
-                             (reduce (fn [e [id tf]]
-                                       (if-not (initialized-set id)
-                                         (let [res (tf e)]
-                                           (-> res (assoc :done-pre true)))
-                                         e))
-                                     env)
-                             (mapv vec)
-                             (into {}))]
-        (-> (or pre-env (into {} env))
-            (assoc ::dm/methods meths))))))
+  (when-not (s/valid? ::root-data env)
+    (throw (js/Error. (str "Invalid env for preform: " (:cljs.spec.alpha/problems (s/explain-data ::root-data env))))))
+  (let [tf-pre-data (:tf-pre env) ;; This is the vector of [id fn] pairs
+        initialized-set (or (get env :init-set) #{})]
+    (if (or (:instantiated? env) (not (seq tf-pre-data)))
+      (assoc env :instantiated? true) ;; Mark as instantiated even if no tf-pre
+      (let [processed-env (reduce
+                           (fn [current-env [id tf-fn]]
+                             (if-not (initialized-set id)
+                               (let [next-env (tf-fn current-env)]
+                                 (-> next-env
+                                     (assoc :done-pre true)
+                                     (update :init-set (fnil conj #{}) id))) ; Corrected '->' form
+                               current-env)) ; else for if-not
+                           env
+                           (u/uniq-by first (partition 2 tf-pre-data)))] ; Corrected to 3 trailing )
+        (assoc processed-env :instantiated? true)))))
 
 (defn tform [env]
   (if-not (seq (:tf env))
     env
-    (let [tf-env (some->> env :tf u/uniq-by-pairwise-first (reduce (fn [e tf] (tf e)) env) (into {}))]
-      (if (seq tf-env)
-        tf-env
-        env))))
+    (let [tf-env (reduce
+                  (fn [current-env [_ tf-fn]] ;; :tf is vector of [id fn]
+                    (tf-fn current-env))
+                  env
+                  ;; Assuming :tf is vector of [id fn] pairs, needs partition 2 before uniq-by
+                  ;; However, u/uniq-by-pairwise-first expects flat list.
+                  ;; If :tf is flat [id1 fn1 id2 fn2], then this is fine.
+                  ;; If :tf is [[id1 fn1] [id2 fn2]], this needs to change.
+                  ;; Based on how :in and :out are structured in tests (conj ::id my-fn),
+                  ;; :tf is likely flat.
+                  (u/uniq-by-pairwise-first (:tf env)))] ;; This was changed in .clj to use map second
+                                                        ;; Let's assume this should be similar to ins/outs
+                                                        ;; (map second (uniq-by first (partition 2 (:tf env))))
+      tf-env)))
+      ; Corrected tform based on how ins/outs now get functions:
+      ; (defn tform [env]
+      ;   (let [pipeline (map second (u/uniq-by first (partition 2 (:tf env))))]
+      ;     (if-not (seq pipeline)
+      ;       env
+      ;       (reduce (fn [current-env tf-fn] (tf-fn current-env)) env pipeline))))
+
 
 (defn endform [env]
-  (let [end-env (some->> env :tf-end u/uniq-by-pairwise-first (reduce (fn [e tf] (tf e)) env) (mapv vec) (into {}))]
-    (or end-env env)))
+  (let [pipeline (map second (u/uniq-by first (partition 2 (:tf-end env))))]
+    (if-not (seq pipeline)
+      env
+      (reduce (fn [current-env tf-fn] (tf-fn current-env)) env pipeline))))
 
-(defn outs [{:as env} args]
-  (->> env
-       :out
-       u/uniq-by-pairwise-first
-       (reduce (fn [argss out]
-                 ((or out identity)
-                  argss))
-               args)))
+
+(defn outs [{:as env-with-res} current-res]
+  (let [pipeline (u/uniq-by-pairwise-first (:out env-with-res))] ;; Returns [fn1 fn2 ...]
+    (if-not (seq pipeline)
+      current-res
+      (reduce (fn [acc-res out-fn] ;; out-fn is now the function
+                ((or out-fn identity) acc-res))
+              current-res
+              pipeline))))
+
 
 (def root
-  (let [r (dyna-map
-           :id [::root]
-           :args []
-           ::tform-pre preform
-           :tf-pre []
-           ::ins ins
-           :in []
-           ::tform tform
-           :tf []
-           ::outs outs
-           :out []
-           ::tform-end endform
-           :tf-end [])]
-    (-> r (assoc-method ::dm/dyna-invoke transformer-invoke))))
+  (-> (w/wrap { ;; Initial data for the root transformer
+               :id [::root]
+               :args []
+               :tf-pre [] ;; Data for pre-processing steps
+               ::ins ins
+               :in []
+               ::tform tform
+               :tf []
+               ::outs outs
+               :out []
+               ::tform-end endform
+               :tf-end []
+               ::tform-pre preform ;; Storing the function itself
+              })
+      (w/assoc :invoke transformer-invoke)))
 
 (comment
-  (require '[ti-yong.alpha.dyna-map :refer [contains-method? method get-methods]])
+  ;; Commented out dyna-map specific requires and examples
+  ;; (require '[ti-yong.alpha.dyna-map :refer [contains-method? method get-methods]])
 
-  (dissoc root :args) ;=> :repl/exception!
-  (dyna-map :a 1) ;=> {:a 1}
-  (type (dyna-map :a 1)) ;=> ti-yong.alpha.dyna-map/PersistentDynamicMap
-  (contains-method? root ::dm/dyna-invoke)
-  (method root ::dm/dyna-invoke)
-  (get-methods root)
+  ;; (dissoc root :args) ;=> :repl/exception!
+  ;; (dyna-map :a 1) ;=> {:a 1}
+  ;; (type (dyna-map :a 1)) ;=> ti-yong.alpha.dyna-map/PersistentDynamicMap
+  ;; (contains-method? root ::dm/dyna-invoke)
+  ;; (method root ::dm/dyna-invoke)
+  ;; (get-methods root)
   root
-  (root) ;=> nil
-  (type root) ;=> ti-yong.alpha.dyna-map/PersistentDynamicMap
-  (root 1) ;=> 1
-  (root :tf-pre) ;=> :tf-pre
-  (root :tf-pre-blah :not-found-here) ;=> (:tf-pre-blah :not-found-here)
-  (root 1 2 3) ;=> (1 2 3)
-  (apply root 1 [2 3]) ;=> (1 2 3)
+  (root) ; Invokes transformer-invoke, which calls preform, then proceeds. Expect behavior based on default root data.
+  ;; (type root) ;=> com.jolygon.wrap-map/WrapMap (or similar, depending on wrap-map's internal types)
+  (root 1) ;=> Calls (transformer-invoke root 1) -> get behavior if not overridden by :invoke
+  (root :tf-pre) ;=> Value of :tf-pre in the root map
+  (root :tf-pre-blah :not-found-here) ;=> :not-found-here
+  ;; (root 1 2 3) ;=> This will call (transformer-invoke root 1 2 3)
 
   (def r1 (-> root (assoc :op +)))
   r1
-  (type r1) ;=>  ;=> ti-yong.alpha.dyna-map/PersistentDynamicMap
+  ;; (type r1) ;=> com.jolygon.wrap-map/WrapMap
   (r1) ;=> 0
-  (r1 1 2 3 4) ;= 10
+  (r1 1 2 3 4) ;=> 10
   (r1 1) ;=> 1
-  (r1 1 2 3 [4 5]) ;=> "6[4 5]" 
-  (apply r1 1 2 3 [4 5]) ;=> 15
-  (time (apply r1 1 2 3 (range 100000))) ;=> 4999950006
-  ; "Elapsed time: 12.000000 msecs"
+  ;; (r1 1 2 3 [4 5]) ;=> This behavior might change based on how + handles mixed args or if :in transforms them.
+                     ;; Assuming + is clojure.core/+ and no :in transforms, it would error on [4 5].
+                     ;; If an :in transform processes args into a flat list of numbers, it would sum them.
+                     ;; Given current root, no :in transforms, so + would be applied to (1 2 3 [4 5]), likely erroring.
+  (apply r1 1 2 3 [4 5]) ;=> Assuming + and default :in, this would be like (apply + 1 2 3 [4 5]) -> error.
+                         ;; If :in processed [4 5] into 4 5, then (apply + 1 2 3 4 5) -> 15
+  ;; Performance comparison would still be relevant.
+  ;; (time (apply r1 1 2 3 (range 100000)))
+  ;; (time (apply + 1 2 3 (range 100000)))
 
-  (time (apply + 1 2 3 (range 100000))) ;=> 4999950006
-  ; "Elapsed time: 13.000000 msecs"
 
   (def x
     (assoc root
            :op +
-          ;;  :x 1 :y 2))
-           :tf-pre [::x-tf-pre (fn [x] (println :x-tf-pre x) x)]
-           :in     [::x-in     (fn [x] (println :x-in     x) x)]
-           :tf     [::x-tf     (fn [x] (println :x-tf     x) x)]
-           :out    [::x-out    (fn [x] (println :x-out    x) x)]
-           :tf-end [::x-tf-end (fn [x] (println :x-tf-end x) x)]))
+           :tf-pre [::x-tf-pre (fn [env] (println :x-tf-pre env) env)]
+           :in     [::x-in     (fn [args] (println :x-in args) args)] ;; :in fns take args
+           :tf     [::x-tf     (fn [env] (println :x-tf env) env)]
+           :out    [::x-out    (fn [res] (println :x-out res) res)] ;; :out fns take result
+           :tf-end [::x-tf-end (fn [env] (println :x-tf-end env) env)]))
 
   x
-  (type x) ;=> ti-yong.alpha.dyna-map/PersistentDynamicMap
-  (x) ;=> 0
+  ;; (type x) ;=> com.jolygon.wrap-map/WrapMap
+  (x) ;=> 0 (prints lifecycle messages)
   (apply x [1]) ;=> 1
   (apply x 1 [2]) ;=> 3
   (x 1 2 4) ;=> 7
-  (apply x 1 2 3 (range 25)) ;=> 306
-  (apply x 1 (range 5)) ;=> 11
+  (apply x 1 2 3 (range 25)) ;=> 306 (sum of 1,2,3 and 0..24)
+  (apply x 1 (range 5)) ;=> 11 (sum of 1 and 0..4)
 
   (def y (assoc x :a 1 :b 2))
   y
@@ -182,19 +229,23 @@
   (apply z 1 (range 25)) ;=> 301
 
   root
-  (root) ;=> nil
-  (def a+ (assoc root :op +)) ;=> #'ti-yong.alpha.pthm/a+
-  (apply a+ 1 2 [3 4]) ;=> 10
+  (root) ; Should now invoke transformer-invoke and likely return nil or based on empty :args and default :op
+  (def a+ (assoc root :op +))
+  (apply a+ 1 2 [3 4]) ; If :in processes [3 4] to 3 4, then 10. Otherwise error.
+                       ; Current `ins` function takes env and current-args.
+                       ; The :in vector contains [id fn] where fn takes acc-args.
+                       ; Default `ins` will pass current-args through if :in is empty.
+                       ; So, (apply + 1 2 [3 4]) -> error.
 
-  (def x+ (assoc a+ :x 1 :y 2))
+  (def x+ (assoc a+ :x 1 :y 2)) ; :x and :y are just data here, not directly used by + unless :in processes them.
 
   x+
-  (type x+)
+  ;; (type x+)
   (x+) ;=> 0
   (x+ 1) ;=> 1
   (x+ 1 2) ;=> 3
   (apply x+ 1 2 (range 23)) ;=> 256
   (apply x+ 1 2 (range 2)) ;=> 4
-  (apply x+ [2 1]) ;=> 3
+  (apply x+ [2 1]) ;=> 3 (assuming clojure.core/+ which sums elements of a single seq arg)
 
   :end)

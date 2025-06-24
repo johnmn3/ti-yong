@@ -2,7 +2,8 @@
   (:require
    [clojure.spec.alpha :as s]
    [ti-yong.alpha.util :as u]
-   [ti-yong.alpha.root :as r]))
+   [ti-yong.alpha.root :as r]
+   [com.jolygon.wrap-map :as w]))
 
 (defn- combine
   [m & maps]

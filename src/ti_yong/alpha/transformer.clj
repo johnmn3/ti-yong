@@ -2,7 +2,8 @@
   (:require
    [clojure.spec.alpha :as s]
    [ti-yong.alpha.util :as u]
-   [ti-yong.alpha.root :as r]))
+   [ti-yong.alpha.root :as r]
+   [com.jolygon.wrap-map :as w]))
 
 (defn- combine
   [m & maps]
@@ -76,17 +77,23 @@
                   env
                   (let [separated (->> with reverse (mapcat #(do [(last (:id %)) %])) (apply separate))
                         specs (:specs env [])
+                        ;; Ensure we are working with plain map data for combination
+                        plain-env-data (w/unwrap (dissoc env :with :specs))
                         seconds (->> separated
                                      (partition 2)
                                      (mapv #(second %))
-                                     (cons (dissoc env :with :specs))
+                                     (cons plain-env-data) ;; Use plain data
                                      vec)
-                        combined (apply combine seconds)
-                        merges  (if-not (seq separated)
-                                  env
-                                  combined)
+                        combined (apply combine seconds) ;; combine will receive plain map as first arg
+                        ;; The result of 'combine' is a plain map.
+                        ;; 'merges' should also be a plain map representing the new state of the environment.
+                        merges (if-not (seq separated)
+                                 plain-env-data ;; If no 'with', use the unwrapped current env data
+                                 combined)
                         merges (-> merges
                                    (update :id (comp vec distinct)))]
+                    ;; The function returns the new environment data (a plain map).
+                    ;; The preform loop in root.clj will use this for the next iteration.
                     (update merges :specs into specs)))))))
 
 (comment
