@@ -2,7 +2,8 @@
   (:require
    [ti-yong.alpha.util :as u]
    [clojure.spec.alpha :as s]
-   [com.jolygon.wrap-map :as w]))
+   [com.jolygon.wrap-map :as w])) ; Removed :refer
+  ;; (:import com.jolygon.wrap_map.api_0.impl.WrapMap)) ; For instance? check - REMOVING DIAGNOSTICS
 
 ;; Forward declaration for preform
 (declare preform)
@@ -105,34 +106,34 @@
       (let [processed-env (reduce
                            (fn [current-env [id tf-fn]]
                              (if-not (initialized-set id)
-                               (let [next-env (tf-fn current-env)]
-                                 ;; Ensure tf-fn returns a map; merge if necessary or replace.
-                                 ;; Assuming tf-fn returns the whole new env.
+                               (let [next-env (tf-fn current-env)] ; result of spec-tf or with-tf
                                  (-> next-env
-                                     (assoc :done-pre true) ; Or some other marker if needed by tf-fn
-                                     (update :init-set (fnil conj #{}) id))) ; Removed one closing parenthesis
+                                     (assoc :done-pre true)
+                                     (update :init-set (fnil conj #{}) id)))
                                current-env))
                            env
-                           (u/uniq-by first (partition 2 tf-pre-data)))] ; Removed two )
+                           (u/uniq-by first (partition 2 tf-pre-data)))]
         (assoc processed-env :instantiated? true)))))
 
 (defn tform [env]
   (if-not (seq (:tf env))
     env
-    (let [tf-env (reduce
-                  (fn [current-env [_ tf-fn]] ;; :tf is vector of [id fn]
-                    (tf-fn current-env))
-                  env
-                  (u/uniq-by-pairwise-first (:tf env)))]
-      tf-env)))
+    (let [pipeline (u/uniq-by-pairwise-first (:tf env))]
+      (if-not (seq pipeline)
+        env
+        (reduce (fn [current-env tf-fn]
+                  ((or tf-fn identity) current-env))
+                env
+                pipeline)))))
 
 (defn endform [env]
-  (let [end-env (reduce
-                 (fn [current-env [_ tf-fn]] ;; :tf-end is vector of [id fn]
-                   (tf-fn current-env))
-                 env
-                 (u/uniq-by-pairwise-first (:tf-end env)))]
-    end-env))
+  (let [pipeline (u/uniq-by-pairwise-first (:tf-end env))]
+    (if-not (seq pipeline)
+      env
+      (reduce (fn [current-env tf-fn]
+                ((or tf-fn identity) current-env))
+              env
+              pipeline))))
 
 (defn outs [{:as env-with-res} current-res]
   (let [pipeline (u/uniq-by-pairwise-first (:out env-with-res))] ;; Returns [fn1 fn2 ...]

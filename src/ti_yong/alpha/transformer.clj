@@ -4,6 +4,7 @@
    [ti-yong.alpha.util :as u]
    [ti-yong.alpha.root :as r]
    [com.jolygon.wrap-map :as w]))
+  ;; (:import com.jolygon.wrap_map.api_0.impl.WrapMap) ; Import removed again
 
 (defn- combine
   [m & maps]
@@ -73,12 +74,16 @@
                     (assoc env :specs (vec (mapcat identity s))))))
               ::with
               (fn with-tf [{:as env :keys [with]}]
+                ;; (if-not (instance? WrapMap env) (throw (ex-info "with-tf: env is not a WrapMap!" {:env-type (type env), :env env}))) ; DIAGNOSTIC REMOVED
+                ;; (if-not (instance? WrapMap env) (throw (ex-info "with-tf: env is not a WrapMap!" {:env-type (type env), :env env}))) ; DIAGNOSTIC REMOVED
                 (if-not (seq with)
                   env
                   (let [separated (->> with reverse (mapcat #(do [(last (:id %)) %])) (apply separate))
                         specs (:specs env [])
                         ;; Ensure we are working with plain map data for combination
-                        plain-env-data (w/unwrap (dissoc env :with :specs))
+                        plain-env-data (if (instance? com.jolygon.wrap_map.api_0.impl.WrapMap env) ; Check type before unwrap
+                                         (w/unwrap (dissoc env :with :specs))
+                                         (dissoc env :with :specs)) ; If already plain, just dissoc
                         seconds (->> separated
                                      (partition 2)
                                      (mapv #(second %))

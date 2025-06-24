@@ -2,7 +2,7 @@
   (:require
    [ti-yong.alpha.util :as u]
    [cljs.spec.alpha :as s]
-   [com.jolygon.wrap-map :as w]))
+   [com.jolygon.wrap-map :as w])) ;; Ensure no :refer for assoc here either
 
 ;; Forward declaration for preform
 (declare preform)
@@ -108,33 +108,23 @@
 (defn tform [env]
   (if-not (seq (:tf env))
     env
-    (let [tf-env (reduce
-                  (fn [current-env [_ tf-fn]] ;; :tf is vector of [id fn]
-                    (tf-fn current-env))
-                  env
-                  ;; Assuming :tf is vector of [id fn] pairs, needs partition 2 before uniq-by
-                  ;; However, u/uniq-by-pairwise-first expects flat list.
-                  ;; If :tf is flat [id1 fn1 id2 fn2], then this is fine.
-                  ;; If :tf is [[id1 fn1] [id2 fn2]], this needs to change.
-                  ;; Based on how :in and :out are structured in tests (conj ::id my-fn),
-                  ;; :tf is likely flat.
-                  (u/uniq-by-pairwise-first (:tf env)))] ;; This was changed in .clj to use map second
-                                                        ;; Let's assume this should be similar to ins/outs
-                                                        ;; (map second (uniq-by first (partition 2 (:tf env))))
-      tf-env)))
-      ; Corrected tform based on how ins/outs now get functions:
-      ; (defn tform [env]
-      ;   (let [pipeline (map second (u/uniq-by first (partition 2 (:tf env))))]
-      ;     (if-not (seq pipeline)
-      ;       env
-      ;       (reduce (fn [current-env tf-fn] (tf-fn current-env)) env pipeline))))
+    (let [pipeline (u/uniq-by-pairwise-first (:tf env))]
+      (if-not (seq pipeline)
+        env
+        (reduce (fn [current-env tf-fn]
+                  ((or tf-fn identity) current-env))
+                env
+                pipeline)))))
 
 
 (defn endform [env]
-  (let [pipeline (map second (u/uniq-by first (partition 2 (:tf-end env))))]
+  (let [pipeline (u/uniq-by-pairwise-first (:tf-end env))]
     (if-not (seq pipeline)
       env
-      (reduce (fn [current-env tf-fn] (tf-fn current-env)) env pipeline))))
+      (reduce (fn [current-env tf-fn]
+                ((or tf-fn identity) current-env))
+              env
+              pipeline))))
 
 
 (defn outs [{:as env-with-res} current-res]
