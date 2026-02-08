@@ -21,3 +21,4 @@ pom.xml.asc
 cljs-test-runner-out/
 .cljs_node_repl/
 .cursorignore
+linux-install.sh

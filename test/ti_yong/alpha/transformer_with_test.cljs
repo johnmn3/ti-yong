@@ -24,9 +24,11 @@
         r-uninvoked (with-transformer-for-key ::r 10 z c)
         env-after-preform (r/preform r-uninvoked)]
 
-    (is (= :root|transformer|r|c|b|a|z|y|x
+    ;; :with is processed left-to-right (natural order), base merged last.
+    ;; Dependencies appear before dependents; last-wins dedup determines final position.
+    (is (= :root|transformer|z|y|c|b|a|x|r
            (->> env-after-preform :id (mapv name) (interpose "|") (apply str) keyword)))
     (is (= {::a 1, ::b 2, ::c 3, ::x 7, ::y 8, ::z 9, ::r 10}
            (select-keys env-after-preform [::a ::b ::c ::x ::y ::z ::r])))
-    (is (= [:r :c :b :a :z :y :x]
+    (is (= [:z :y :x :c :b :a :r]
            (->> env-after-preform :tf (partition 2) (map first) (map name) (map keyword) vec)))))
