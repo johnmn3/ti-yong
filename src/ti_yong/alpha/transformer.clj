@@ -22,7 +22,7 @@
          (mapv (fn [[k v]]
                  (if-not (and (vector? v) (keyword? (first v)) (not (keyword? (second v))))
                    [k v]
-                   (let [nv (->> v (partition 2) (u/uniq-by first) (apply concat) vec)]
+                   (let [nv (->> v (partition 2) reverse (u/uniq-by first) reverse (apply concat) vec)]
                      [k nv]))))
          (into {})
          (merge m))))
@@ -60,18 +60,17 @@
               (fn with-tf [{:as env :keys [with]}]
                 (if-not (seq with)
                   env
-                  (let [separated (->> with reverse (mapcat #(do [(last (:id %)) %])) (apply separate))
+                  (let [separated (->> with (mapcat #(do [(last (:id %)) %])) (apply separate))
                         excluded (::r/excluded-keys env #{})
                         specs (:specs env [])
                         plain-env-data (if (instance? com.jolygon.wrap_map.api_0.impl.WrapMap env)
                                          (w/unwrap (dissoc env :with :specs ::r/excluded-keys))
                                          (dissoc env :with :specs ::r/excluded-keys))
-                        seconds (->> separated
-                                     (partition 2)
-                                     (mapv #(second %))
-                                     (cons plain-env-data)
-                                     vec)
-                        combined (apply combine seconds)
+                        with-entries (->> separated
+                                          (partition 2)
+                                          (mapv second))
+                        seconds (conj with-entries plain-env-data)
+                        combined (apply combine (first seconds) (rest seconds))
                         merges (if-not (seq separated)
                                  plain-env-data
                                  combined)

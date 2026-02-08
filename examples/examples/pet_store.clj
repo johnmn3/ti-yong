@@ -110,15 +110,15 @@
 
     ["/pets" :get list-pets
      :route-name ::list-pets
-     :with [mw/keyword-params mw/query-params]]
+     :with [mw/query-params mw/keyword-params]]
 
     ["/pets" :post create-pet
      :route-name ::create-pet
-     :with [mw/keyword-params mw/body-params]]
+     :with [mw/body-params mw/keyword-params]]
 
     ["/pets/search" :get search-pets
      :route-name ::search-pets
-     :with [mw/keyword-params mw/query-params]]
+     :with [mw/query-params mw/keyword-params]]
 
     ["/pets/:id" :get get-pet
      :route-name ::get-pet
@@ -126,7 +126,7 @@
 
     ["/pets/:id" :put update-pet
      :route-name ::update-pet
-     :with [(load-pet-middleware) mw/keyword-params mw/body-params]]
+     :with [mw/body-params mw/keyword-params (load-pet-middleware)]]
 
     ["/pets/:id" :delete delete-pet
      :route-name ::delete-pet

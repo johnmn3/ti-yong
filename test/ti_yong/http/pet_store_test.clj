@@ -205,8 +205,8 @@
                                                         :bp (:body-params env)})
                                       {:status 200 :headers {} :body "ok"})
                                     :route-name ::kp-test
-                                    ;; keyword-params FIRST so it runs LAST (reversed merge)
-                                    :with [mw/keyword-params mw/body-params mw/query-params]]]}]
+                                    ;; natural order: parse first, then keywordize
+                                    :with [mw/query-params mw/body-params mw/keyword-params]]]}]
       (http/response-for test-svc :post "/test"
                          {:query-string "page=1"
                           :body "{\"name\":\"test\"}"

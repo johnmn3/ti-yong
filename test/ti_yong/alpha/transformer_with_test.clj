@@ -24,11 +24,11 @@
         ;; including the ::with transform from ti-yong.alpha.transformer.
         env-after-preform (r/preform r-uninvoked)]
 
-    ;; Updated expected order based on how `combine` and `with-tf` merge :id and :tf vectors
-    ;; The current transformer's :id comes first, then its :with dependencies.
-    (is (= :root|transformer|r|c|b|a|z|y|x ;; Corrected to match previous actual output
+    ;; :with is processed left-to-right (natural order), base merged last.
+    ;; Dependencies appear before dependents; last-wins dedup determines final position.
+    (is (= :root|transformer|z|y|c|b|a|x|r
            (->> env-after-preform :id (mapv name) (interpose "|") (apply str) keyword)))
     (is (= {::a 1, ::b 2, ::c 3, ::x 7, ::y 8, ::z 9, ::r 10}
            (select-keys env-after-preform [::a ::b ::c ::x ::y ::z ::r])))
-    (is (= [:r :c :b :a :z :y :x] ;; Matches the actual :id order logic
+    (is (= [:z :y :x :c :b :a :r]
            (->> env-after-preform :tf (partition 2) (map first) (map name) (map keyword) vec)))))
