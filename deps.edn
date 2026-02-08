@@ -4,6 +4,8 @@
          :sha "5f60211132fc40ea9c6a4ebe1bdd4e67d58b390a"}
         org.clojure/clojure {:mvn/version "1.11.2"}
          org.clojure/clojurescript {:mvn/version "1.11.132"}
+         org.clojure/core.async {:mvn/version "1.8.741"}
+         com.cognitect/transit-clj {:mvn/version "1.0.333"}
          com.jolygon/wrap-map {:mvn/version "0.1.12"}}
  :aliases
  {:cljs

@@ -7,7 +7,8 @@
    [hearth.alpha.adapter.ring :as ring]
    [hearth.alpha.middleware :as mw]
    [hearth.alpha.error :as err]
-   [hearth.alpha.sse :as sse]))
+   [hearth.alpha.sse :as sse]
+   [hearth.alpha.websocket :as ws-impl]))
 
 ;; --- Default middleware stack ---
 
@@ -219,12 +220,43 @@
   "Format an event map as SSE text."
   mw/format-sse-event)
 
-;; --- SSE ---
+;; --- Transit ---
 
-(def event-channel
-  "Create an SSE event channel for sending events to a client."
-  sse/event-channel)
+(defn transit-body-middleware
+  "Middleware that parses Transit request bodies (JSON or MessagePack)."
+  ([] (mw/transit-body))
+  ([opts] (mw/transit-body opts)))
+
+(defn transit-json-response-middleware
+  "Middleware that serializes response body as Transit+JSON."
+  ([] (mw/transit-json-response))
+  ([opts] (mw/transit-json-response opts)))
+
+(defn transit-msgpack-response-middleware
+  "Middleware that serializes response body as Transit+MessagePack."
+  ([] (mw/transit-msgpack-response))
+  ([opts] (mw/transit-msgpack-response opts)))
+
+;; --- SSE ---
 
 (def event-stream
   "Create an SSE handler. See hearth.alpha.sse/event-stream for details."
   sse/event-stream)
+
+;; --- WebSocket ---
+
+(def ws-handler
+  "Create a WebSocket handler from callbacks. See hearth.alpha.websocket/ws-handler."
+  ws-impl/ws-handler)
+
+(def ws-channel-handler
+  "Create a WebSocket handler with core.async channels. See hearth.alpha.websocket/ws-channel-handler."
+  ws-impl/ws-channel-handler)
+
+(def ws-upgrade
+  "Middleware that upgrades WebSocket requests. See hearth.alpha.websocket/ws-upgrade."
+  ws-impl/ws-upgrade)
+
+(def ws-listener
+  "Create a Ring WebSocket listener from callbacks. See hearth.alpha.websocket/listener."
+  ws-impl/listener)

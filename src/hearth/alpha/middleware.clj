@@ -1,7 +1,10 @@
 (ns hearth.alpha.middleware
   (:require
    [clojure.string :as str]
-   [ti-yong.alpha.transformer :as t]))
+   [cognitect.transit :as transit]
+   [ti-yong.alpha.transformer :as t])
+  (:import
+   [java.io ByteArrayInputStream ByteArrayOutputStream]))
 
 ;; Middleware are transformers intended to be composed via :with.
 ;; Each middleware adds steps to :tf (env transforms), :out (response transforms),
@@ -979,3 +982,94 @@
 
 (def parse-json-string simple-json-parse)
 (def serialize-json-string serialize-json)
+
+;; --- Transit ---
+
+(defn- transit-read
+  "Read transit data from an InputStream or string."
+  [input format opts]
+  (let [in (cond
+             (instance? java.io.InputStream input) input
+             (string? input) (ByteArrayInputStream. (.getBytes ^String input "UTF-8"))
+             :else nil)]
+    (when in
+      (let [reader (if (seq opts)
+                     (transit/reader in format opts)
+                     (transit/reader in format))]
+        (transit/read reader)))))
+
+(defn- transit-write
+  "Write data as transit to a byte array."
+  [data format opts]
+  (let [baos (ByteArrayOutputStream.)]
+    (let [writer (if (seq opts)
+                   (transit/writer baos format opts)
+                   (transit/writer baos format))]
+      (transit/write writer data))
+    (.toByteArray baos)))
+
+(defn transit-body
+  "Middleware that parses Transit request bodies (JSON or MessagePack).
+   Detects format from Content-Type header."
+  ([] (transit-body {}))
+  ([{:keys [opts] :or {opts {}}}]
+   (-> t/transformer
+       (update :id conj ::transit-body)
+       (update :tf conj
+               ::transit-body
+               (fn [env]
+                 (let [ct (get-in env [:headers "content-type"] "")]
+                   (cond
+                     (str/includes? ct "transit+json")
+                     (let [body (:body env)]
+                       (if body
+                         (assoc env :body-params (transit-read body :json opts))
+                         env))
+
+                     (str/includes? ct "transit+msgpack")
+                     (let [body (:body env)]
+                       (if body
+                         (assoc env :body-params (transit-read body :msgpack opts))
+                         env))
+
+                     :else env)))))))
+
+(defn transit-json-response
+  "Middleware that serializes response body as Transit+JSON.
+   Sets Content-Type to application/transit+json."
+  ([] (transit-json-response {}))
+  ([{:keys [opts] :or {opts {}}}]
+   (-> t/transformer
+       (update :id conj ::transit-json-response)
+       (update :tf-end conj
+               ::transit-json-response
+               (fn [env]
+                 (let [res (:res env)]
+                   (if (and (map? res) (:body res)
+                            (not (string? (:body res)))
+                            (not (instance? java.io.InputStream (:body res))))
+                     (assoc env :res
+                            (-> res
+                                (assoc :body (transit-write (:body res) :json opts))
+                                (assoc-in [:headers "Content-Type"] "application/transit+json")))
+                     env)))))))
+
+(defn transit-msgpack-response
+  "Middleware that serializes response body as Transit+MessagePack.
+   Sets Content-Type to application/transit+msgpack."
+  ([] (transit-msgpack-response {}))
+  ([{:keys [opts] :or {opts {}}}]
+   (-> t/transformer
+       (update :id conj ::transit-msgpack-response)
+       (update :tf-end conj
+               ::transit-msgpack-response
+               (fn [env]
+                 (let [res (:res env)]
+                   (if (and (map? res) (:body res)
+                            (not (string? (:body res)))
+                            (not (instance? java.io.InputStream (:body res))))
+                     (assoc env :res
+                            (-> res
+                                (assoc :body (transit-write (:body res) :msgpack opts))
+                                (assoc-in [:headers "Content-Type"] "application/transit+msgpack")))
+                     env)))))))

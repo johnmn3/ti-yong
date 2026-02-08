@@ -1,77 +1,67 @@
 (ns hearth.alpha.sse
   "Server-Sent Events support for hearth.
    Provides event-stream handler creation and SSE event formatting.
-   Uses JDK concurrency primitives (no core.async dependency)."
-  (:require [hearth.alpha.middleware :as mw])
-  (:import [java.util.concurrent LinkedBlockingQueue TimeUnit]))
+   Uses core.async channels for event delivery."
+  (:require
+   [clojure.core.async :as a]
+   [hearth.alpha.middleware :as mw]))
 
 ;; Re-export format-sse-event from middleware
 (def format-event mw/format-sse-event)
 
-(defn event-channel
-  "Create an event channel backed by a LinkedBlockingQueue.
-   Returns a map with:
-     :put!  - (fn [event]) puts an event on the channel
-     :close! - (fn []) closes the channel
-     :queue  - the underlying queue (for internal use)"
-  ([] (event-channel 256))
-  ([capacity]
-   (let [q (LinkedBlockingQueue. (int capacity))
-         closed? (atom false)]
-     {:put! (fn [event]
-              (when-not @closed?
-                (.offer q event)))
-      :close! (fn []
-                (reset! closed? true)
-                (.offer q ::closed))
-      :closed? closed?
-      :queue q})))
-
 (defn event-stream
   "Create an SSE handler function.
-   `stream-fn` is called with (event-channel, request-env) when a client connects.
-   The stream-fn should use (:put! ch) to send events and (:close! ch) to end.
+   `stream-fn` is called with (event-ch, request-env) when a client connects.
+   Put events on event-ch with core.async/>! or >!!.
+   Close event-ch to end the stream.
 
    Options:
      :heartbeat-ms - heartbeat interval in ms (default: 10000, nil to disable)
      :on-close     - (fn []) called when the stream ends
-     :headers      - extra headers to merge into the SSE response"
-  [stream-fn & [{:keys [heartbeat-ms on-close headers]
-                  :or {heartbeat-ms 10000}}]]
+     :headers      - extra headers to merge into the SSE response
+     :buf-or-n     - buffer size for event channel (default: 32)"
+  [stream-fn & [{:keys [heartbeat-ms on-close headers buf-or-n]
+                  :or {heartbeat-ms 10000
+                       buf-or-n 32}}]]
   (fn [request-env]
-    (let [ch (event-channel)
-          q (:queue ch)
+    (let [event-ch (a/chan buf-or-n)
           body-fn (fn [^java.io.OutputStream os]
                     (try
-                      (let [writer (java.io.OutputStreamWriter. os "UTF-8")]
-                        (loop []
-                          (let [event (if heartbeat-ms
-                                        (.poll q heartbeat-ms TimeUnit/MILLISECONDS)
-                                        (.take q))]
+                      (let [writer (java.io.OutputStreamWriter. os "UTF-8")
+                            timeout-ch (when heartbeat-ms
+                                         (a/timeout heartbeat-ms))]
+                        (loop [timeout-ch timeout-ch]
+                          (let [ports (cond-> [event-ch]
+                                       timeout-ch (conj timeout-ch))
+                                [v port] (a/alts!! ports)]
                             (cond
-                              ;; Channel closed
-                              (= ::closed event)
+                              ;; Event channel closed (v=nil, port=event-ch)
+                              (and (nil? v) (= port event-ch))
                               nil ;; exit loop
 
-                              ;; Heartbeat (timeout, nil from poll)
-                              (nil? event)
+                              ;; Heartbeat timeout
+                              (and timeout-ch (= port timeout-ch))
                               (do (.write writer ":\n\n")
                                   (.flush writer)
-                                  (recur))
+                                  (recur (when heartbeat-ms
+                                           (a/timeout heartbeat-ms))))
 
                               ;; Normal event
                               :else
-                              (do (.write writer (format-event event))
+                              (do (.write writer (format-event v))
                                   (.flush writer)
-                                  (recur))))))
+                                  (recur (if (and timeout-ch (= port event-ch))
+                                           (when heartbeat-ms
+                                             (a/timeout heartbeat-ms))
+                                           timeout-ch)))))))
                       (catch java.io.IOException _
                         ;; Client disconnected
-                        nil)
+                        (a/close! event-ch))
                       (finally
                         (when on-close (on-close)))))]
-      ;; Call the user's stream-ready function
-      (stream-fn ch request-env)
-      ;; Return SSE response
+      ;; Call the user's stream-ready function with the channel
+      (stream-fn event-ch request-env)
+      ;; Return SSE response with streaming body
       {:status 200
        :headers (merge {"Content-Type" "text/event-stream"
                         "Cache-Control" "no-cache, no-store"
