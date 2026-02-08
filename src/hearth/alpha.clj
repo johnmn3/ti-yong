@@ -134,3 +134,52 @@
   "Middleware that URL-decodes path parameter values."
   []
   mw/path-params-decoder)
+
+(defn cookies-middleware
+  "Middleware that parses/writes cookies."
+  []
+  mw/cookies)
+
+(defn session-middleware
+  "Middleware for session management."
+  ([] (mw/session))
+  ([opts] (mw/session opts)))
+
+(defn csrf-middleware
+  "Middleware for CSRF protection."
+  ([] (mw/csrf))
+  ([opts] (mw/csrf opts)))
+
+(defn multipart-params-middleware
+  "Middleware that parses multipart/form-data bodies."
+  ([] (mw/multipart-params))
+  ([opts] (mw/multipart-params opts)))
+
+(defn nested-params-middleware
+  "Middleware that nests bracket-notation params."
+  []
+  mw/nested-params)
+
+(defn head-method-middleware
+  "Middleware that converts HEAD to GET and strips response body."
+  []
+  mw/head-method)
+
+(defn not-modified-middleware
+  "Middleware that returns 304 when ETag/Last-Modified match."
+  []
+  mw/not-modified)
+
+(defn resource-middleware
+  "Middleware that serves static classpath resources."
+  [opts]
+  (mw/resource opts))
+
+(defn file-middleware
+  "Middleware that serves static filesystem files."
+  [opts]
+  (mw/file opts))
+
+(def format-sse-event
+  "Format an event map as SSE text."
+  mw/format-sse-event)

@@ -562,6 +562,434 @@
                                     {} params))
                   env)))))
 
+;; --- Cookies ---
+
+(defn- parse-cookie-header
+  "Parse a Cookie header string into a map of {name {:value value}}."
+  [header]
+  (when (and header (not (str/blank? header)))
+    (->> (str/split header #";\s*")
+         (map str/trim)
+         (filter seq)
+         (reduce (fn [m pair]
+                   (let [eq-idx (str/index-of pair "=")]
+                     (if eq-idx
+                       (let [k (str/trim (subs pair 0 eq-idx))
+                             v (str/trim (subs pair (inc eq-idx)))]
+                         (assoc m k {:value v}))
+                       m)))
+                 {}))))
+
+(defn- serialize-set-cookie
+  "Serialize a single Set-Cookie entry. cookie-val is {:value v :path p :domain d ...}."
+  [name cookie-val]
+  (let [{:keys [value path domain max-age secure http-only same-site expires]} cookie-val]
+    (str name "=" value
+         (when path (str "; Path=" path))
+         (when domain (str "; Domain=" domain))
+         (when max-age (str "; Max-Age=" max-age))
+         (when expires (str "; Expires=" expires))
+         (when secure "; Secure")
+         (when http-only "; HttpOnly")
+         (when same-site (str "; SameSite=" same-site)))))
+
+(defn- serialize-set-cookies
+  "Serialize a cookies map into a vector of Set-Cookie header strings."
+  [cookies-map]
+  (mapv (fn [[name val]]
+          (serialize-set-cookie name
+                                (if (map? val) val {:value (str val)})))
+        cookies-map))
+
+(def cookies
+  "Middleware that parses Cookie header into :cookies map on request,
+   and writes Set-Cookie headers from :cookies on response."
+  (-> t/transformer
+      (update :id conj ::cookies)
+      (update :tf conj
+              ::cookies-parse
+              (fn [env]
+                (let [cookie-header (get-in env [:headers "cookie"])]
+                  (if cookie-header
+                    (assoc env :cookies (parse-cookie-header cookie-header))
+                    (assoc env :cookies {})))))
+      (update :tf-end conj
+              ::cookies-write
+              (fn [env]
+                (let [res (:res env)
+                      cookies-to-set (:cookies res)]
+                  (if (and (map? res) (seq cookies-to-set))
+                    (let [set-cookie-headers (serialize-set-cookies cookies-to-set)]
+                      (assoc env :res
+                             (-> res
+                                 (dissoc :cookies)
+                                 (update :headers
+                                         (fn [h]
+                                           (assoc h "Set-Cookie"
+                                                  (str/join ", " set-cookie-headers)))))))
+                    env))))))
+
+;; --- Session ---
+
+(defprotocol ISessionStore
+  (read-session [store key])
+  (write-session [store key data])
+  (delete-session [store key]))
+
+(defn memory-store
+  "In-memory session store backed by an atom. For development only."
+  []
+  (let [sessions (atom {})]
+    (reify ISessionStore
+      (read-session [_ key] (get @sessions key))
+      (write-session [_ key data] (swap! sessions assoc key data) key)
+      (delete-session [_ key] (swap! sessions dissoc key)))))
+
+(defn session
+  "Middleware that loads/saves session data from a store.
+   Options:
+     :store       - ISessionStore impl (default: memory-store)
+     :cookie-name - session cookie name (default: 'hearth-session')
+     :cookie-attrs - map of cookie attributes for the session cookie"
+  ([] (session {}))
+  ([{:keys [store cookie-name cookie-attrs]
+     :or {store (memory-store) cookie-name "hearth-session"}}]
+   (-> t/transformer
+       (update :id conj ::session)
+       (update :tf conj
+               ::session-load
+               (fn [env]
+                 (let [session-id (get-in env [:cookies cookie-name :value])
+                       session-data (when session-id (read-session store session-id))]
+                   (assoc env :session (or session-data {})
+                              ::session-id session-id
+                              ::session-store store
+                              ::session-cookie-name cookie-name
+                              ::session-cookie-attrs cookie-attrs))))
+       (update :tf-end conj
+               ::session-save
+               (fn [env]
+                 (let [res (:res env)
+                       session-from-res (when (map? res) (:session res))
+                       session (or session-from-res (:session env))
+                       session-id (or (::session-id env)
+                                      (str (java.util.UUID/randomUUID)))
+                       s-store (::session-store env store)
+                       s-cookie (::session-cookie-name env cookie-name)
+                       s-attrs (::session-cookie-attrs env cookie-attrs)]
+                   (write-session s-store session-id session)
+                   (let [cookie-val (merge {:value session-id} s-attrs)
+                         set-cookie-str (serialize-set-cookie s-cookie cookie-val)
+                         res (if (map? res)
+                               (-> res
+                                   (dissoc :session)
+                                   (update :headers
+                                           (fn [h]
+                                             (let [existing (get h "Set-Cookie")]
+                                               (assoc h "Set-Cookie"
+                                                      (if existing
+                                                        (str existing ", " set-cookie-str)
+                                                        set-cookie-str))))))
+                               res)]
+                     (assoc env :res res))))))))
+
+;; --- CSRF ---
+
+(defn csrf
+  "Middleware that validates anti-forgery tokens on state-changing requests.
+   Options:
+     :read-token     - fn to extract token from request env
+     :error-response - response map for failed validation
+     :token-length   - length of generated tokens (default 32)"
+  ([] (csrf {}))
+  ([{:keys [read-token error-response]
+     :or {read-token (fn [env]
+                       (or (get-in env [:form-params "__anti-forgery-token"])
+                           (get-in env [:headers "x-csrf-token"])
+                           (get-in env [:query-params "__anti-forgery-token"])))
+          error-response {:status 403 :headers {} :body "Forbidden - CSRF token invalid"}}}]
+   (-> t/transformer
+       (update :id conj ::csrf)
+       (update :tf conj
+               ::csrf
+               (fn [env]
+                 (let [method (:request-method env)]
+                   (if (#{:get :head :options} method)
+                     ;; Safe methods: generate/attach token
+                     (let [token (or (get-in env [:session :csrf-token])
+                                     (str (java.util.UUID/randomUUID)))]
+                       (-> env
+                           (assoc :csrf-token token)
+                           (assoc-in [:session :csrf-token] token)))
+                     ;; Unsafe methods: validate token
+                     (let [expected (get-in env [:session :csrf-token])
+                           actual (read-token env)]
+                       (if (and expected actual (= expected actual))
+                         env
+                         (assoc env :res error-response))))))))))
+
+;; --- Multipart Params ---
+
+(defn- parse-multipart-boundary
+  "Extract the boundary string from a multipart content-type header."
+  [content-type]
+  (when content-type
+    (second (re-find #"boundary=(.+)" content-type))))
+
+(defn- parse-multipart-body
+  "Parse a multipart/form-data body string into a map of parts.
+   Each part is either a string value or a map with :filename, :content-type, :bytes."
+  [body boundary]
+  (when (and body boundary)
+    (let [body-str (if (string? body) body (slurp body))
+          delimiter (str "--" boundary)
+          parts (-> body-str
+                    (str/split (re-pattern (java.util.regex.Pattern/quote delimiter)))
+                    rest)  ;; first element is empty before first boundary
+          parts (remove #(or (str/blank? %) (str/starts-with? (str/trim %) "--")) parts)]
+      (reduce
+       (fn [m part]
+         (let [part (str/trim part)
+               [headers-section body-section] (str/split part #"\r?\n\r?\n" 2)]
+           (when (and headers-section body-section)
+             (let [disp-line (->> (str/split-lines headers-section)
+                                  (filter #(str/starts-with?
+                                            (str/lower-case %) "content-disposition"))
+                                  first)
+                   name-match (when disp-line
+                                (second (re-find #"name=\"([^\"]+)\"" disp-line)))
+                   filename-match (when disp-line
+                                    (second (re-find #"filename=\"([^\"]+)\"" disp-line)))
+                   ct-line (->> (str/split-lines headers-section)
+                                (filter #(str/starts-with?
+                                          (str/lower-case %) "content-type"))
+                                first)
+                   part-ct (when ct-line
+                             (str/trim (second (str/split ct-line #":" 2))))]
+               (if name-match
+                 (assoc m name-match
+                        (if filename-match
+                          {:filename filename-match
+                           :content-type (or part-ct "application/octet-stream")
+                           :bytes (.getBytes ^String (str/trim body-section) "UTF-8")
+                           :size (count (.getBytes ^String (str/trim body-section) "UTF-8"))}
+                          (str/trim body-section)))
+                 m)))))
+       {}
+       parts))))
+
+(defn- multipart-content-type?
+  [headers]
+  (when-let [ct (get headers "content-type")]
+    (str/includes? ct "multipart/form-data")))
+
+(defn multipart-params
+  "Middleware that parses multipart/form-data request bodies.
+   Options:
+     :max-size - maximum body size in bytes (default 10MB)"
+  ([] (multipart-params {}))
+  ([{:keys [max-size] :or {max-size (* 10 1024 1024)}}]
+   (-> t/transformer
+       (update :id conj ::multipart-params)
+       (update :tf conj
+               ::multipart-params
+               (fn [env]
+                 (if (multipart-content-type? (:headers env))
+                   (let [ct (get-in env [:headers "content-type"])
+                         boundary (parse-multipart-boundary ct)
+                         body (:body env)]
+                     (if (and boundary body)
+                       (let [parsed (parse-multipart-body body boundary)]
+                         (assoc env :multipart-params parsed))
+                       env))
+                   env))))))
+
+;; --- Nested Params ---
+
+(defn- nest-params
+  "Transform flat bracket-notation params into nested maps.
+   e.g. {\"user[name]\" \"Alice\"} -> {\"user\" {\"name\" \"Alice\"}}"
+  [params]
+  (when params
+    (reduce-kv
+     (fn [m k v]
+       (if (str/includes? (str k) "[")
+         (let [;; Parse keys: 'a[b][c]' -> ['a' 'b' 'c']
+               parts (-> (str k)
+                         (str/replace "]" "")
+                         (str/split #"\["))
+               path (mapv str/trim parts)]
+           (assoc-in m path v))
+         (assoc m k v)))
+     {}
+     params)))
+
+(def nested-params
+  "Middleware that nests flat params with bracket notation into nested maps.
+   e.g. user[name]=Alice -> {:user {:name \"Alice\"}}"
+  (-> t/transformer
+      (update :id conj ::nested-params)
+      (update :tf conj
+              ::nested-params
+              (fn [env]
+                (cond-> env
+                  (:query-params env) (update :query-params nest-params)
+                  (:form-params env) (update :form-params nest-params)
+                  (:body-params env) (update :body-params nest-params))))))
+
+;; --- HEAD Method Support ---
+
+(def head-method
+  "Middleware that converts HEAD requests to GET, then strips the response body.
+   This allows GET handlers to also serve HEAD requests automatically."
+  (-> t/transformer
+      (update :id conj ::head-method)
+      (update :tf conj
+              ::head-method
+              (fn [env]
+                (if (= :head (:request-method env))
+                  (assoc env :request-method :get ::was-head? true)
+                  env)))
+      (update :tf-end conj
+              ::head-method-strip
+              (fn [env]
+                (if (::was-head? env)
+                  (let [res (:res env)]
+                    (if (map? res)
+                      (assoc env :res (assoc res :body nil))
+                      env))
+                  env)))))
+
+;; --- Not Modified (304) ---
+
+(defn- parse-http-date
+  "Parse an HTTP date string to epoch millis. Returns nil on failure."
+  [date-str]
+  (try
+    (when date-str
+      (.getTime (.parse (java.text.SimpleDateFormat. "EEE, dd MMM yyyy HH:mm:ss zzz")
+                         date-str)))
+    (catch Exception _ nil)))
+
+(def not-modified
+  "Middleware that returns 304 Not Modified when appropriate.
+   Supports ETag/If-None-Match and Last-Modified/If-Modified-Since."
+  (-> t/transformer
+      (update :id conj ::not-modified)
+      (update :tf-end conj
+              ::not-modified
+              (fn [env]
+                (let [res (:res env)]
+                  (if (and (map? res) (= 200 (:status res)))
+                    (let [req-etag (get-in env [:headers "if-none-match"])
+                          res-etag (get-in res [:headers "ETag"])
+                          req-modified (get-in env [:headers "if-modified-since"])
+                          res-modified (get-in res [:headers "Last-Modified"])]
+                      (if (or (and req-etag res-etag (= req-etag res-etag))
+                              (and req-modified res-modified
+                                   (let [req-ms (parse-http-date req-modified)
+                                         res-ms (parse-http-date res-modified)]
+                                     (and req-ms res-ms (<= res-ms req-ms)))))
+                        (assoc env :res {:status 304
+                                         :headers (select-keys (:headers res)
+                                                               ["ETag" "Last-Modified"])
+                                         :body nil})
+                        env))
+                    env))))))
+
+;; --- Static Resources (classpath) ---
+
+(defn- mime-type-for
+  "Guess MIME type from a file path."
+  [path]
+  (let [ext (when-let [i (str/last-index-of path ".")]
+              (subs path (inc i)))]
+    (case ext
+      "html" "text/html"
+      "htm"  "text/html"
+      "css"  "text/css"
+      "js"   "application/javascript"
+      "json" "application/json"
+      "png"  "image/png"
+      "jpg"  "image/jpeg"
+      "jpeg" "image/jpeg"
+      "gif"  "image/gif"
+      "svg"  "image/svg+xml"
+      "ico"  "image/x-icon"
+      "txt"  "text/plain"
+      "xml"  "application/xml"
+      "pdf"  "application/pdf"
+      "woff" "font/woff"
+      "woff2" "font/woff2"
+      "ttf"  "font/ttf"
+      "eot"  "application/vnd.ms-fontobject"
+      "application/octet-stream")))
+
+(defn resource
+  "Middleware that serves static files from the classpath.
+   Runs in :tf-end as a fallback — only serves if response is 404 or no response set.
+   Options:
+     :prefix - classpath prefix (default: 'public')"
+  [{:keys [prefix] :or {prefix "public"}}]
+  (-> t/transformer
+      (update :id conj ::resource)
+      (update :tf-end conj
+              ::resource
+              (fn [env]
+                (let [res (:res env)]
+                  (if (and res (map? res) (not= 404 (:status res)))
+                    env  ;; Non-404 response exists, don't override
+                    (let [path (str prefix (:uri env))
+                          safe? (not (str/includes? path ".."))
+                          rsrc (when safe? (clojure.java.io/resource path))]
+                      (if rsrc
+                        (assoc env :res {:status 200
+                                         :headers {"Content-Type" (mime-type-for path)}
+                                         :body (clojure.java.io/input-stream rsrc)})
+                        env))))))))
+
+;; --- Static Resources (filesystem) ---
+
+(defn file
+  "Middleware that serves static files from a filesystem directory.
+   Runs in :tf-end as a fallback — only serves if response is 404 or no response set.
+   Options:
+     :root - base directory path"
+  [{:keys [root]}]
+  (-> t/transformer
+      (update :id conj ::file)
+      (update :tf-end conj
+              ::file
+              (fn [env]
+                (let [res (:res env)]
+                  (if (and res (map? res) (not= 404 (:status res)))
+                    env
+                    (let [uri (:uri env)
+                          f (java.io.File. ^String root ^String uri)
+                          canonical (.getCanonicalPath f)
+                          root-canonical (.getCanonicalPath (java.io.File. ^String root))]
+                      (if (and (.exists f)
+                               (.isFile f)
+                               (str/starts-with? canonical root-canonical))
+                        (assoc env :res {:status 200
+                                         :headers {"Content-Type" (mime-type-for uri)
+                                                   "Content-Length" (str (.length f))}
+                                         :body (java.io.FileInputStream. f)})
+                        env)))))))))
+
+;; --- SSE Event Formatting ---
+
+(defn format-sse-event
+  "Format an event map (or plain string) as SSE text.
+   Event map keys: :data (required), :event (optional), :id (optional), :retry (optional)"
+  [event]
+  (let [event (if (map? event) event {:data event})]
+    (str
+     (when-let [id (:id event)] (str "id: " id "\n"))
+     (when-let [evt (:event event)] (str "event: " evt "\n"))
+     (when-let [retry (:retry event)] (str "retry: " retry "\n"))
+     "data: " (str (:data event)) "\n\n")))
+
 ;; --- Public JSON helpers ---
 
 (def parse-json-string simple-json-parse)
