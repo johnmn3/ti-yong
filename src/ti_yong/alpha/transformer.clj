@@ -212,13 +212,15 @@
 
   r
   (:id r)
-  (= :root|transformer|a|b|c|x|y|z|r
+  ;; :with is processed left-to-right (natural order), base merged last.
+  ;; Dependencies appear before dependents; last-wins dedup determines final position.
+  (= :root|transformer|z|y|c|b|a|x|r
      (->> r :id (mapv name) (interpose "|") (apply str) keyword))
 
   (= {:r 21, :z 22, :x 20, :y 21, :c 3, :b 2, :a 1}
      (select-keys r [:r :z :x :y :c :b :a]))
 
-  (= [:a :b :c :x :y :z :r]
+  (= [:z :y :x :c :b :a :r]
      (->> r :tf (partition 2) (map first) (map name) (map keyword) vec))
 
   (require '[clojure.pprint :as pp])
