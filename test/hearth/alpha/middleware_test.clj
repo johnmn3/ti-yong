@@ -1,7 +1,7 @@
-(ns hearth.middleware-test
+(ns hearth.alpha.middleware-test
   (:require
    [clojure.test :refer [deftest testing is]]
-   [hearth.middleware :as mw]
+   [hearth.alpha.middleware :as mw]
    [ti-yong.alpha.transformer :as t]))
 
 ;; Phase 2: Middleware as transformer mixins

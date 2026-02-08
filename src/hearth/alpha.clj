@@ -1,12 +1,12 @@
-(ns hearth
+(ns hearth.alpha
   "Public API for ti-yong HTTP.
    Provides create-server, start, stop, response-for, and
    convenience wrappers for common middleware."
   (:require
-   [hearth.service :as svc]
-   [hearth.adapter.ring :as ring]
-   [hearth.middleware :as mw]
-   [hearth.error :as err]))
+   [hearth.alpha.service :as svc]
+   [hearth.alpha.adapter.ring :as ring]
+   [hearth.alpha.middleware :as mw]
+   [hearth.alpha.error :as err]))
 
 ;; --- Server lifecycle ---
 

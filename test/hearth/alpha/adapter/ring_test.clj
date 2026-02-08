@@ -1,8 +1,8 @@
-(ns hearth.adapter.ring-test
+(ns hearth.alpha.adapter.ring-test
   (:require
    [clojure.test :refer [deftest testing is]]
-   [hearth.adapter.ring :as ring]
-   [hearth.service :as svc]))
+   [hearth.alpha.adapter.ring :as ring]
+   [hearth.alpha.service :as svc]))
 
 ;; Phase 6: Ring/Jetty adapter
 ;; Converts a service transformer into a Ring handler function,

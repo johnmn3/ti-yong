@@ -1,9 +1,9 @@
-(ns hearth.service-test
+(ns hearth.alpha.service-test
   (:require
    [clojure.test :refer [deftest testing is]]
-   [hearth.service :as svc]
-   [hearth.middleware :as mw]
-   [hearth.error :as err]
+   [hearth.alpha.service :as svc]
+   [hearth.alpha.middleware :as mw]
+   [hearth.alpha.error :as err]
    [ti-yong.alpha.transformer :as t]))
 
 ;; Phase 5: Service transformer

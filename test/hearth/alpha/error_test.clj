@@ -1,7 +1,7 @@
-(ns hearth.error-test
+(ns hearth.alpha.error-test
   (:require
    [clojure.test :refer [deftest testing is]]
-   [hearth.error :as err]
+   [hearth.alpha.error :as err]
    [ti-yong.alpha.transformer :as t]))
 
 ;; Phase 4: Error handler mixin

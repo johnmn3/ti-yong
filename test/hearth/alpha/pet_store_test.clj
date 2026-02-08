@@ -1,11 +1,11 @@
-(ns hearth.pet-store-test
+(ns hearth.alpha.pet-store-test
   "Comprehensive Pet Store API tests via response-for (no running server).
    Ports patterns from Pedestal's pedestal-api example."
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
    [clojure.walk :as walk]
-   [hearth :as http]
-   [hearth.middleware :as mw]
+   [hearth.alpha :as http]
+   [hearth.alpha.middleware :as mw]
    [examples.pet-store :as pet-store]))
 
 ;; --- Fixtures ---

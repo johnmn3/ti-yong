@@ -1,7 +1,7 @@
-(ns hearth.response-test
+(ns hearth.alpha.response-test
   (:require
    [clojure.test :refer [deftest testing is]]
-   [hearth.response :as resp]
+   [hearth.alpha.response :as resp]
    [ti-yong.alpha.transformer :as t]))
 
 ;; Phase 1: Response transformer primitives

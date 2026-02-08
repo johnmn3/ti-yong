@@ -1,11 +1,11 @@
-(ns hearth.integration-test
+(ns hearth.alpha.integration-test
   (:require
    [clojure.test :refer [deftest testing is]]
-   [hearth :as http]
-   [hearth.response :as resp]
-   [hearth.request :as req]
-   [hearth.middleware :as mw]
-   [hearth.error :as err]
+   [hearth.alpha :as http]
+   [hearth.alpha.response :as resp]
+   [hearth.alpha.request :as req]
+   [hearth.alpha.middleware :as mw]
+   [hearth.alpha.error :as err]
    [ti-yong.alpha.transformer :as t]))
 
 ;; Integration tests: full-stack scenarios exercising the complete pipeline.

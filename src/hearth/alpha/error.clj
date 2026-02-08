@@ -1,4 +1,4 @@
-(ns hearth.error
+(ns hearth.alpha.error
   (:refer-clojure :exclude [error-handler])
   (:require
    [ti-yong.alpha.transformer :as t]))

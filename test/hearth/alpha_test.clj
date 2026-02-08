@@ -1,10 +1,10 @@
-(ns hearth-test
+(ns hearth.alpha-test
   (:require
    [clojure.test :refer [deftest testing is]]
-   [hearth :as http]))
+   [hearth.alpha :as http]))
 
 ;; Phase 7: Public API tests
-;; The hearth namespace is the user-facing entry point.
+;; The hearth.alpha namespace is the user-facing entry point.
 ;; It provides create-server, start, stop, response-for, and
 ;; re-exports key utilities from sub-namespaces.
 

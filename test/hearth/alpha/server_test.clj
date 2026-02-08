@@ -1,11 +1,11 @@
-(ns hearth.server-test
+(ns hearth.alpha.server-test
   "Tests against a running Jetty server.
    Verifies Ring compatibility and real HTTP behavior."
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
-   [hearth :as http]
-   [hearth.middleware :as mw]
-   [hearth.error :as err]
+   [hearth.alpha :as http]
+   [hearth.alpha.middleware :as mw]
+   [hearth.alpha.error :as err]
    [examples.pet-store :as pet-store])
   (:import
    [java.net URI]
