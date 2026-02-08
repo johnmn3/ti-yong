@@ -75,6 +75,25 @@
       (is (vector? (:id router)))
       (is (some #(= ::route/router %) (:id router)))))
 
+  (testing "router URL-decodes path parameter values"
+    (let [handler (fn [env] {:status 200 :body (get-in env [:path-params-values "id"])})
+          router (route/router
+                  [["/items/:id" :get handler :route-name ::get-item]])]
+      (let [result (-> router
+                       (assoc :request-method :get :uri "/items/hello%20world")
+                       (apply []))]
+        (is (= 200 (:status result)))
+        (is (= "hello world" (:body result))))))
+
+  (testing "router decodes special URL characters in path params"
+    (let [handler (fn [env] {:status 200 :body (get-in env [:path-params-values "id"])})
+          router (route/router
+                  [["/items/:id" :get handler :route-name ::get-item]])]
+      (let [result (-> router
+                       (assoc :request-method :get :uri "/items/foo%26bar%3Dbaz")
+                       (apply []))]
+        (is (= "foo&bar=baz" (:body result))))))
+
   (testing "router-tf dispatches to correct handler via :env-op"
     (let [list-handler (fn [env] {:status 200 :body "list"})
           get-handler (fn [env] {:status 200 :body (str "item-" (get-in env [:path-params-values "id"]))})

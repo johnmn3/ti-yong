@@ -130,11 +130,6 @@
   ([] (mw/method-param))
   ([param-name] (mw/method-param param-name)))
 
-(defn path-params-decoder-middleware
-  "Middleware that URL-decodes path parameter values."
-  []
-  mw/path-params-decoder)
-
 (defn cookies-middleware
   "Middleware that parses/writes cookies."
   []

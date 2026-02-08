@@ -546,22 +546,6 @@
                        env))
                    env))))))
 
-;; --- Path Params URL Decoder ---
-
-(def path-params-decoder
-  "Middleware that URL-decodes path parameter values."
-  (-> t/transformer
-      (update :id conj ::path-params-decoder)
-      (update :tf conj
-              ::path-params-decoder
-              (fn [env]
-                (if-let [params (:path-params-values env)]
-                  (assoc env :path-params-values
-                         (reduce-kv (fn [m k v]
-                                      (assoc m k (java.net.URLDecoder/decode v "UTF-8")))
-                                    {} params))
-                  env)))))
-
 ;; --- Cookies ---
 
 (defn- parse-cookie-header
