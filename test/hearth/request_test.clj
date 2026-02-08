@@ -1,7 +1,7 @@
-(ns ti-yong.http.request-test
+(ns hearth.request-test
   (:require
    [clojure.test :refer [deftest testing is]]
-   [ti-yong.http.request :as req]
+   [hearth.request :as req]
    [ti-yong.alpha.transformer :as t]))
 
 ;; Phase 1: Request transformer primitives

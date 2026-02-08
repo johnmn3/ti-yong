@@ -1,7 +1,7 @@
-(ns ti-yong.http.middleware-test
+(ns hearth.middleware-test
   (:require
    [clojure.test :refer [deftest testing is]]
-   [ti-yong.http.middleware :as mw]
+   [hearth.middleware :as mw]
    [ti-yong.alpha.transformer :as t]))
 
 ;; Phase 2: Middleware as transformer mixins

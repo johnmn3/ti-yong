@@ -1,8 +1,8 @@
 (ns tiyong.bench-tiyong
   "ti-yong-http benchmark server with plaintext, JSON, and routing endpoints."
   (:require
-   [ti-yong.http :as http]
-   [ti-yong.http.middleware :as mw]))
+   [hearth :as http]
+   [hearth.middleware :as mw]))
 
 ;; --- Handlers ---
 

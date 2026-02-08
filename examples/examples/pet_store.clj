@@ -4,9 +4,9 @@
    query params, body parsing, content negotiation, CORS, error handling,
    custom interceptors (load-pet), and content-type management."
   (:require
-   [ti-yong.http :as http]
-   [ti-yong.http.middleware :as mw]
-   [ti-yong.http.error :as err]
+   [hearth :as http]
+   [hearth.middleware :as mw]
+   [hearth.error :as err]
    [ti-yong.alpha.transformer :as t]))
 
 ;; --- Data Store ---

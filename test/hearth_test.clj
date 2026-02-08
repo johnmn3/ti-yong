@@ -1,10 +1,10 @@
-(ns ti-yong.http-test
+(ns hearth-test
   (:require
    [clojure.test :refer [deftest testing is]]
-   [ti-yong.http :as http]))
+   [hearth :as http]))
 
 ;; Phase 7: Public API tests
-;; The ti-yong.http namespace is the user-facing entry point.
+;; The hearth namespace is the user-facing entry point.
 ;; It provides create-server, start, stop, response-for, and
 ;; re-exports key utilities from sub-namespaces.
 

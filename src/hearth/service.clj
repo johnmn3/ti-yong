@@ -1,7 +1,7 @@
-(ns ti-yong.http.service
+(ns hearth.service
   (:require
    [ti-yong.alpha.transformer :as t]
-   [ti-yong.http.route :as route]))
+   [hearth.route :as route]))
 
 ;; Service transformer: the root pipeline that combines
 ;; a router with global middleware.

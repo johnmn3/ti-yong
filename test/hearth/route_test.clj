@@ -1,8 +1,8 @@
-(ns ti-yong.http.route-test
+(ns hearth.route-test
   (:require
    [clojure.test :refer [deftest testing is]]
-   [ti-yong.http.route :as route]
-   [ti-yong.http.middleware :as mw]
+   [hearth.route :as route]
+   [hearth.middleware :as mw]
    [ti-yong.alpha.transformer :as t]))
 
 ;; Phase 3: Route expansion + router transformer

@@ -1,6 +1,6 @@
-(ns ti-yong.http.adapter.ring
+(ns hearth.adapter.ring
   (:require
-   [ti-yong.http.service :as svc]))
+   [hearth.service :as svc]))
 
 ;; Ring adapter: converts a service transformer into a Ring handler
 ;; and provides server lifecycle management.

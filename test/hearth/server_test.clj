@@ -1,11 +1,11 @@
-(ns ti-yong.http.server-test
+(ns hearth.server-test
   "Tests against a running Jetty server.
    Verifies Ring compatibility and real HTTP behavior."
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
-   [ti-yong.http :as http]
-   [ti-yong.http.middleware :as mw]
-   [ti-yong.http.error :as err]
+   [hearth :as http]
+   [hearth.middleware :as mw]
+   [hearth.error :as err]
    [examples.pet-store :as pet-store])
   (:import
    [java.net URI]
