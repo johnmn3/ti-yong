@@ -117,3 +117,20 @@
   "Middleware that serializes response body to JSON and sets Content-Type."
   []
   mw/json-body-response)
+
+(defn secure-headers-middleware
+  "Middleware that adds security headers to responses.
+   Pass a map to override defaults, or no args for Pedestal defaults."
+  ([] (mw/secure-headers))
+  ([overrides] (mw/secure-headers overrides)))
+
+(defn method-param-middleware
+  "Middleware that overrides :request-method from a query/form param.
+   Only overrides POST requests. Default param: '_method'."
+  ([] (mw/method-param))
+  ([param-name] (mw/method-param param-name)))
+
+(defn path-params-decoder-middleware
+  "Middleware that URL-decodes path parameter values."
+  []
+  mw/path-params-decoder)

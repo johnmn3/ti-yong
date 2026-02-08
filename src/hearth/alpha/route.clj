@@ -57,9 +57,14 @@
               (assoc :with (:with opts)))))
         route-defs))
 
+(defn- url-decode
+  "URL-decode a string value."
+  [s]
+  (java.net.URLDecoder/decode s "UTF-8"))
+
 (defn match-route
   "Find the first route matching the given method and path.
-   Returns the route map with :path-params-values populated if matched."
+   Returns the route map with :path-params-values populated (URL-decoded) if matched."
   [routes method path]
   (first
    (for [route routes
@@ -69,8 +74,9 @@
      (let [param-names (:path-param-names route)
            param-values (if (seq param-names)
                           (zipmap param-names
-                                  (map #(nth (re-find (re-matcher (:path-regex route) path))
-                                             (inc %))
+                                  (map #(url-decode
+                                         (nth (re-find (re-matcher (:path-regex route) path))
+                                              (inc %)))
                                        (range (count param-names))))
                           {})]
        (cond-> route

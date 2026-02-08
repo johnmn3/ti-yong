@@ -1,70 +1,110 @@
 (ns ti-yong.alpha.root
   (:require
    [ti-yong.alpha.util :as u]
+   [ti-yong.alpha.async :as async]
    [clojure.spec.alpha :as s]
    [com.jolygon.wrap-map :as w]))
 
 ;; Forward declaration for preform
 (declare preform)
 
+(defn- async-reduce
+  "Like reduce, but if f returns a deferred value, chains remaining steps.
+   For the sync path, this is a normal loop/recur with only a deferred? check
+   per step (~5ns protocol dispatch on Object). When any step returns a deferred,
+   the remainder is chained via async/then."
+  [f init coll]
+  (loop [acc init
+         remaining (seq coll)]
+    (if-not remaining
+      acc
+      (if (async/deferred? acc)
+        ;; Gone async — chain the rest via then
+        (reduce (fn [d step]
+                  (async/then d #(f % step)))
+                acc
+                remaining)
+        ;; Still sync — normal reduce step
+        (recur (f acc (first remaining))
+               (next remaining))))))
+
+(defn- chain-stages
+  "Execute a sequence of (fn [value] -> value-or-deferred) stages.
+   If any stage returns a deferred, chain remaining stages via async/then.
+   For the sync path, this is a normal loop/recur."
+  [init stages]
+  (loop [v init
+         remaining (seq stages)]
+    (if-not remaining
+      v
+      (if (async/deferred? v)
+        ;; Gone async — chain rest
+        (reduce (fn [d stage] (async/then d stage))
+                v
+                remaining)
+        ;; Still sync
+        (recur ((first remaining) v)
+               (next remaining))))))
+
 (defn transformer-invoke [original-env & args]
-  (let [env (preform original-env)
-        ;; Ensure args from the env are combined with passed-in args
-        combined-args (concat (:args env) args)
-        tf* (update env :op #(or % u/identities))
-        ;; `this` and `params` are not standard wrap-map concepts,
-        ;; assuming they are part of the `env` structure for ti-yong's logic
-        this (:this (:params tf*))
-        tf* (merge tf* this)
+  (chain-stages
+   (preform original-env)
+   [;; Stage 1: ins + tform
+    (fn [env]
+      (let [combined-args (concat (:args env) args)
+            tf* (update env :op #(or % u/identities))
+            this (:this (:params tf*))
+            tf* (merge tf* this)
+            ins-fn (::ins tf* identity)
+            tform-fn (::tform tf* identity)
+            processed-args (if-not (seq (:in tf*))
+                             combined-args
+                             (ins-fn tf* combined-args))
+            continue (fn [proc-args]
+                       (let [arg-env (assoc tf* :args proc-args)]
+                         (if-not tform-fn
+                           arg-env
+                           (tform-fn arg-env))))]
+        (if (async/deferred? processed-args)
+          (async/then processed-args continue)
+          (continue processed-args))))
 
-        ins-fn (::ins tf* identity)
-        tform-fn (::tform tf* identity)
-        outs-fn (::outs tf*)
-        tform-end-fn (::tform-end tf* identity)
+    ;; Stage 2: op/env-op -> outs
+    (fn [tf-env]
+      (let [tf-args (:args tf-env [])
+            op (or (:op tf-env) u/identities)
+            env-op (:env-op tf-env)
+            res (if env-op (env-op tf-env) (apply op tf-args))
+            outs-fn (::outs tf-env)
+            continue (fn [r]
+                       (let [out-res (if-not outs-fn
+                                      r
+                                      (outs-fn (assoc tf-env :args tf-args :res r) r))]
+                         (if (async/deferred? out-res)
+                           (async/then out-res #(assoc tf-env :args tf-args :res %))
+                           (assoc tf-env :args tf-args :res out-res))))]
+        (if (async/deferred? res)
+          (async/then res continue)
+          (continue res))))
 
-        processed-args (if-not (seq (:in tf*))
-                         combined-args
-                         (ins-fn tf* combined-args))
-
-        arg-env (assoc tf* :args processed-args)
-
-        tf-env (if-not tform-fn
-                 arg-env
-                 (tform-fn arg-env))
-
-        tf-args (:args tf-env [])
-        op (or (:op tf-env) u/identities)
-        env-op (:env-op tf-env)
-
-        run-op (if env-op
-                 (partial env-op tf-env) ;; If env-op exists, it takes the whole env
-                 (partial op)) ;; Otherwise, op takes tf-args
-
-        res (if env-op
-              (run-op) ;; env-op is called with no args as tf-env is curried
-              (apply run-op tf-args)) ;; op is applied to tf-args
-
-        out-res (if-not outs-fn
-                  res
-                  (outs-fn (assoc tf-env :args tf-args :res res) res))
-
-        res-env (assoc tf-env :args tf-args :res out-res)
-
-        end-env (if-not tform-end-fn
-                  res-env
-                  (tform-end-fn res-env))
-
-        new-res (:res end-env)]
-    new-res))
+    ;; Stage 3: tf-end -> extract :res
+    (fn [res-env]
+      (let [tform-end-fn (::tform-end res-env identity)
+            end-env (if-not tform-end-fn
+                      res-env
+                      (tform-end-fn res-env))]
+        (if (async/deferred? end-env)
+          (async/then end-env :res)
+          (:res end-env))))]))
 
 (defn ins [env current-args]
-  (let [pipeline (u/uniq-by-pairwise-first (:in env))] ;; Returns [fn1 fn2 ...]
+  (let [pipeline (u/uniq-by-pairwise-first (:in env))]
     (if-not (seq pipeline)
       current-args
-      (reduce (fn [acc-args in-fn] ;; in-fn is now the function
-                ((or in-fn identity) acc-args))
-              current-args
-              pipeline))))
+      (async-reduce (fn [acc-args in-fn]
+                      ((or in-fn identity) acc-args))
+                    current-args
+                    pipeline))))
 
 ;; Specs remain largely the same, as they describe the data structure (env)
 ;; processed by transformer-invoke and its helper functions.
@@ -99,10 +139,10 @@
   (let [tf-pre-data (:tf-pre env)]
     (if (not (seq tf-pre-data))
       env
-      (reduce (fn [current-env [_id tf-fn]]
-                (tf-fn current-env))
-              env
-              (u/uniq-by first (partition 2 tf-pre-data))))))
+      (async-reduce (fn [current-env [_id tf-fn]]
+                      (tf-fn current-env))
+                    env
+                    (u/uniq-by first (partition 2 tf-pre-data))))))
 
 (defn tform [env]
   (if-not (seq (:tf env))
@@ -110,28 +150,28 @@
     (let [pipeline (u/uniq-by-pairwise-first (:tf env))]
       (if-not (seq pipeline)
         env
-        (reduce (fn [current-env tf-fn]
-                  ((or tf-fn identity) current-env))
-                env
-                pipeline)))))
+        (async-reduce (fn [current-env tf-fn]
+                        ((or tf-fn identity) current-env))
+                      env
+                      pipeline)))))
 
 (defn endform [env]
   (let [pipeline (u/uniq-by-pairwise-first (:tf-end env))]
     (if-not (seq pipeline)
       env
-      (reduce (fn [current-env tf-fn]
-                ((or tf-fn identity) current-env))
-              env
-              pipeline))))
+      (async-reduce (fn [current-env tf-fn]
+                      ((or tf-fn identity) current-env))
+                    env
+                    pipeline))))
 
 (defn outs [{:as env-with-res} current-res]
-  (let [pipeline (u/uniq-by-pairwise-first (:out env-with-res))] ;; Returns [fn1 fn2 ...]
+  (let [pipeline (u/uniq-by-pairwise-first (:out env-with-res))]
     (if-not (seq pipeline)
       current-res
-      (reduce (fn [acc-res out-fn] ;; out-fn is now the function
-                ((or out-fn identity) acc-res))
-              current-res
-              pipeline))))
+      (async-reduce (fn [acc-res out-fn]
+                      ((or out-fn identity) acc-res))
+                    current-res
+                    pipeline))))
 
 
 (def root

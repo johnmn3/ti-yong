@@ -499,6 +499,69 @@
                                (assoc-in [:headers "Content-Type"] "application/json")))
                     env))))))
 
+;; --- Secure Headers ---
+
+(def ^:private default-secure-headers
+  {"X-Frame-Options" "DENY"
+   "X-Content-Type-Options" "nosniff"
+   "X-XSS-Protection" "1; mode=block"
+   "Strict-Transport-Security" "max-age=31536000; includeSubdomains"
+   "X-Download-Options" "noopen"
+   "X-Permitted-Cross-Domain-Policies" "none"
+   "Content-Security-Policy" "object-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'strict-dynamic' https: http:;"})
+
+(defn secure-headers
+  "Middleware that adds security headers to responses.
+   Pass a map to override defaults, or no args for Pedestal defaults."
+  ([] (secure-headers {}))
+  ([overrides]
+   (let [headers (merge default-secure-headers overrides)]
+     (-> t/transformer
+         (update :id conj ::secure-headers)
+         (update :tf-end conj
+                 ::secure-headers
+                 (fn [env]
+                   (let [res (:res env)]
+                     (if (map? res)
+                       (assoc env :res (update res :headers merge headers))
+                       env))))))))
+
+;; --- Method Override ---
+
+(defn method-param
+  "Middleware that overrides :request-method from a query/form param.
+   Default param name is '_method'. Only overrides POST requests."
+  ([] (method-param "_method"))
+  ([param-name]
+   (-> t/transformer
+       (update :id conj ::method-param)
+       (update :tf conj
+               ::method-param
+               (fn [env]
+                 (if (= :post (:request-method env))
+                   (let [override (or (get (:query-params env) param-name)
+                                      (get (:form-params env) param-name))]
+                     (if override
+                       (assoc env :request-method (keyword (str/lower-case override)))
+                       env))
+                   env))))))
+
+;; --- Path Params URL Decoder ---
+
+(def path-params-decoder
+  "Middleware that URL-decodes path parameter values."
+  (-> t/transformer
+      (update :id conj ::path-params-decoder)
+      (update :tf conj
+              ::path-params-decoder
+              (fn [env]
+                (if-let [params (:path-params-values env)]
+                  (assoc env :path-params-values
+                         (reduce-kv (fn [m k v]
+                                      (assoc m k (java.net.URLDecoder/decode v "UTF-8")))
+                                    {} params))
+                  env)))))
+
 ;; --- Public JSON helpers ---
 
 (def parse-json-string simple-json-parse)
