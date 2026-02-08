@@ -1,30 +1,30 @@
 (ns ti-yong.alpha.root-test
   (:require
    [clojure.test :refer [deftest is]]
-   [ti-yong.alpha.dyna-map :as dm]
    [ti-yong.alpha.root :as r]
-   [ti-yong.alpha.util :as u]))
+   [ti-yong.alpha.util :as u]
+   [com.jolygon.wrap-map :as w]))
 
 (deftest root-call-arities-test
   (is (= nil (r/root)))
-  (is (= 1 (r/root 1)))
+  (is (= 1 (r/root 1))) ;; u/identities returns raw value for single arg
   (is (= false (r/root false)))
   (is (= :anything-else (r/root :anything-else)))
   (is (= '(1 2) (r/root 1 2)))
   (is (= '(1 2 3) (r/root 1 2 3)))
   (is (= '(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21)
          (r/root 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21)))
-  (is (= '(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22)
+  (is (= (cons 1 (range 2 23))
         (apply r/root 1 (range 2 23))))
   (is (= (range 100)
         (apply r/root 0 1 (range 2 100)))))
 
 (deftest root-basic-test
-  (is (= dm/PersistentDynamicMap (type r/root)))
-  (is (= {:a 1, :b 2} (r/root {:b 2, :a 1}))))
+  (is (map? r/root))
+  (is (= {:a 1, :b 2} (r/root {:b 2, :a 1})))) ;; u/identities returns raw value
 
 (deftest root-op-test
-  (is (= 3 (-> r/root (assoc :op +) (apply [1 2]))))
+  (is (= 3 (apply (-> r/root (assoc :op +)) [1 2])))
   (is (= -4 (-> r/root (assoc :op -) (apply [1 2 3]))))
   (is (= 24 (-> r/root (assoc :op *) (apply [1 2 3 4]))))
   (is (= 0.041666666666666664 (-> r/root (assoc :op /) (apply [1 2 3 4]))))

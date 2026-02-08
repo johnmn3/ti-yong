@@ -812,7 +812,17 @@ forthcoming)
 
 ## Running Tests
 
-To run the tests for this project just run `clojure -A:test`.
+To run the Clojure tests:
+
+```bash
+clojure -M:clj-test
+```
+
+To run the ClojureScript tests:
+
+```bash
+clojure -M:cljs-test
+```
 
 ##  Prior Art
 

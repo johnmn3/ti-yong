@@ -2,7 +2,9 @@
   (:require
    [clojure.spec.alpha :as s]
    [ti-yong.alpha.util :as u]
-   [ti-yong.alpha.root :as r]))
+   [ti-yong.alpha.root :as r]
+   [com.jolygon.wrap-map :as w]))
+  ;; (:import com.jolygon.wrap_map.api_0.impl.WrapMap) ; Import removed again
 
 (defn- combine
   [m & maps]
@@ -54,6 +56,29 @@
       (update :id conj ::transformer)
       (assoc :with [] :specs [::transformer ::transformer])
       (update :tf-pre conj
+              ::with
+              (fn with-tf [{:as env :keys [with]}]
+                (if-not (seq with)
+                  env
+                  (let [separated (->> with reverse (mapcat #(do [(last (:id %)) %])) (apply separate))
+                        excluded (::r/excluded-keys env #{})
+                        specs (:specs env [])
+                        plain-env-data (if (instance? com.jolygon.wrap_map.api_0.impl.WrapMap env)
+                                         (w/unwrap (dissoc env :with :specs ::r/excluded-keys))
+                                         (dissoc env :with :specs ::r/excluded-keys))
+                        seconds (->> separated
+                                     (partition 2)
+                                     (mapv #(second %))
+                                     (cons plain-env-data)
+                                     vec)
+                        combined (apply combine seconds)
+                        merges (if-not (seq separated)
+                                 plain-env-data
+                                 combined)
+                        merges (reduce dissoc merges excluded)
+                        merges (-> merges
+                                   (update :id (comp vec distinct)))]
+                    (update merges :specs into specs))))
               ::spec
               (fn spec-tf [{:as env :keys [specs]}]
                 (if-not (seq specs)
@@ -62,32 +87,14 @@
                     (doseq [spec (map second s)]
                       (when-not (s/valid? spec env)
                         (throw
-                         (let [error-str (->> env ;; <- use ex-data/ex-info here?
+                         (let [error-str (->> env
                                               (s/explain-data spec)
-                                              :cljs.spec.alpha/problems
+                                              :clojure.spec.alpha/problems
                                               first
                                               :pred
                                               (str spec " "))]
                            (ex-info error-str {:error error-str :env env :spec spec})))))
-                    (assoc env :specs (vec (mapcat identity s))))))
-              ::with
-              (fn with-tf [{:as env :keys [with]}]
-                (if-not (seq with)
-                  env
-                  (let [separated (->> with reverse (mapcat #(do [(last (:id %)) %])) (apply separate))
-                        specs (:specs env [])
-                        seconds (->> separated
-                                     (partition 2)
-                                     (mapv #(second %))
-                                     (cons (dissoc env :with :specs))
-                                     vec)
-                        combined (apply combine seconds)
-                        merges  (if-not (seq separated)
-                                  env
-                                  combined)
-                        merges (-> merges
-                                   (update :id (comp vec distinct)))]
-                    (update merges :specs into specs)))))))
+                    (assoc env :specs (vec (mapcat identity s)))))))))
 
 (comment
 
