@@ -726,7 +726,8 @@
                            actual (read-token env)]
                        (if (and expected actual (= expected actual))
                          env
-                         (assoc env :res error-response))))))))))
+                         ;; Short-circuit: replace the handler with error response
+                         (assoc env :env-op (constantly error-response)))))))))))
 
 ;; --- Multipart Params ---
 
@@ -975,7 +976,7 @@
                                          :headers {"Content-Type" (mime-type-for uri)
                                                    "Content-Length" (str (.length f))}
                                          :body (java.io.FileInputStream. f)})
-                        env)))))))))
+                        env))))))))
 
 ;; --- SSE Event Formatting ---
 
