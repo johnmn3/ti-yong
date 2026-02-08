@@ -34,7 +34,8 @@
                                                   :body (str "item-" (get-in env [:path-params-values "id"]))})
                                        :route-name ::get-item]
                                       ["/items" :post (fn [_] {:status 201 :body "created"})
-                                       :route-name ::create]]}]
+                                       :route-name ::create]]
+                       ::http/raw? true}]
       (is (= {:status 200 :body "list"}
              (http/response-for service-map :get "/items")))
       (is (= {:status 201 :body "created"}

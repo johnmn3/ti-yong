@@ -6,7 +6,35 @@
    [hearth.alpha.service :as svc]
    [hearth.alpha.adapter.ring :as ring]
    [hearth.alpha.middleware :as mw]
-   [hearth.alpha.error :as err]))
+   [hearth.alpha.error :as err]
+   [hearth.alpha.sse :as sse]))
+
+;; --- Default middleware stack ---
+
+(defn default-middleware
+  "Returns the default middleware stack, equivalent to Pedestal's default-interceptors.
+   Automatically applied by create-server unless ::raw? true in the service map.
+
+   Includes (in order):
+     - error-handler: catches exceptions, returns 500
+     - secure-headers: adds security headers (X-Frame-Options, CSP, etc.)
+     - not-found-handler: returns 404 for unmatched routes
+     - head-method: converts HEAD to GET, strips body on leave
+     - not-modified: returns 304 for conditional requests
+     - query-params: parses query string
+     - method-param: allows HTTP method override via _method param
+
+   Pass a service map to customize (e.g., ::secure-headers-overrides)."
+  ([] (default-middleware {}))
+  ([service-map]
+   (let [sh-overrides (::secure-headers-overrides service-map {})]
+     [err/error-handler
+      (mw/secure-headers sh-overrides)
+      (mw/not-found-handler "Not Found")
+      mw/head-method
+      mw/not-modified
+      mw/query-params
+      (mw/method-param)])))
 
 ;; --- Server lifecycle ---
 
@@ -15,13 +43,19 @@
    Service map keys (namespaced under ::):
      ::routes - vector of route definition vectors
      ::port   - server port (default 8080)
-     ::with   - global middleware transformers (optional)
+     ::with   - global middleware transformers (optional, prepended to defaults)
+     ::raw?   - if true, skip default middleware (default false)
      ::join?  - block the calling thread? (default true)"
   [service-map]
   (let [routes (::routes service-map)
-        with   (::with service-map)
+        user-with (::with service-map)
+        raw?   (::raw? service-map false)
         port   (::port service-map 8080)
         join?  (::join? service-map true)
+        with   (if raw?
+                 (vec user-with)
+                 (into (vec (or user-with []))
+                       (default-middleware service-map)))
         svc    (svc/service (cond-> {:routes routes}
                               (seq with) (assoc :with with)))]
     (ring/create-server svc {:port port :join? join?})))
@@ -41,12 +75,18 @@
 
 (defn response-for
   "Test helper: invoke a service-map with method, path, and optional extras.
-   Does not start a server — runs the transformer pipeline directly."
+   Does not start a server — runs the transformer pipeline directly.
+   Applies default middleware unless ::raw? true in the service map."
   ([service-map method path]
    (response-for service-map method path {}))
   ([service-map method path extras]
    (let [routes (::routes service-map)
-         with   (::with service-map)
+         user-with (::with service-map)
+         raw?   (::raw? service-map false)
+         with   (if raw?
+                  (vec user-with)
+                  (into (vec (or user-with []))
+                        (default-middleware service-map)))
          svc    (svc/service (cond-> {:routes routes}
                                (seq with) (assoc :with with)))]
      (svc/response-for svc method path extras))))
@@ -178,3 +218,13 @@
 (def format-sse-event
   "Format an event map as SSE text."
   mw/format-sse-event)
+
+;; --- SSE ---
+
+(def event-channel
+  "Create an SSE event channel for sending events to a client."
+  sse/event-channel)
+
+(def event-stream
+  "Create an SSE handler. See hearth.alpha.sse/event-stream for details."
+  sse/event-stream)
