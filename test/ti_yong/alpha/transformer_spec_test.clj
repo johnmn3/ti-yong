@@ -4,13 +4,13 @@
    [clojure.test :refer [deftest is]]
    [ti-yong.alpha.transformer :as t]
    [ti-yong.alpha.root :as r]
-   [com.jolygon.wrap-map :as w]) ; Added w
-  (:import com.jolygon.wrap_map.api_0.impl.WrapMap))
+   [com.jolygon.wrap-map :as w]
+   [com.jolygon.wrap-map.api-0.common :as wc]))
 
 (deftest wrap-map-assoc-preserves-type-test
-  (let [wm (w/wrap {:original :data}) ; Simple WrapMap, no custom methods needed for this test
+  (let [wm (w/wrap {:original :data})
         wm-assoc (assoc wm :new-key :new-val)]
-    (is (instance? WrapMap wm-assoc)
+    (is (satisfies? wc/IWrapAssociative wm-assoc)
         "assoc on a WrapMap should return a WrapMap")
     (is (= :new-val (:new-key wm-assoc)))
     (is (= :data (:original wm-assoc)))))
@@ -42,21 +42,21 @@
 (deftest transformer-spec-test
   ;; Specs are checked by `spec-tf` (a :tf-pre function within preform)
   ;; when the transformer is invoked.
-  (is (instance? WrapMap t/transformer) "t/transformer should be a WrapMap")
+  (is (satisfies? wc/IWrapAssociative t/transformer) "t/transformer should be a WrapMap")
 
   (let [a-valid (with-transformer-for-spec :a ::a 1 ::a-spec)
-        _ (is (instance? WrapMap a-valid) "a-valid should be a WrapMap")
+        _ (is (satisfies? wc/IWrapAssociative a-valid) "a-valid should be a WrapMap")
         a-invalid-data (dissoc a-valid :a) ; :a is the data key, now removed
 
         b-valid (with-transformer-for-spec :b ::b 2 ::b-spec a-valid)
 
         x-valid (with-transformer-for-spec :x ::x 7 ::x-spec a-valid)
-        _ (is (instance? WrapMap x-valid) "x-valid should be a WrapMap")
+        _ (is (satisfies? wc/IWrapAssociative x-valid) "x-valid should be a WrapMap")
         x-invalid-data-a (dissoc x-valid :a) ; Remove :a, should fail ::a-spec (inherited)
         x-invalid-data-x (dissoc x-valid :x) ; Remove :x, should fail ::x-spec
 
         r-valid (with-transformer-for-spec :r ::r 10 ::r-spec b-valid x-valid)
-        _ (is (instance? WrapMap r-valid) "r-valid should be a WrapMap")
+        _ (is (satisfies? wc/IWrapAssociative r-valid) "r-valid should be a WrapMap")
         r-invalid-data-a (dissoc r-valid :a) ; Remove :a, inherited, should fail ::a-spec
         r-invalid-data-r (dissoc r-valid :r)] ; Remove :r, should fail ::r-spec
 

@@ -56,6 +56,29 @@
       (update :id conj ::transformer)
       (assoc :with [] :specs [::transformer ::transformer])
       (update :tf-pre conj
+              ::with
+              (fn with-tf [{:as env :keys [with]}]
+                (if-not (seq with)
+                  env
+                  (let [separated (->> with reverse (mapcat #(do [(last (:id %)) %])) (apply separate))
+                        excluded (::r/excluded-keys env #{})
+                        specs (:specs env [])
+                        plain-env-data (if (instance? com.jolygon.wrap_map.api_0.impl.WrapMap env)
+                                         (w/unwrap (dissoc env :with :specs ::r/excluded-keys))
+                                         (dissoc env :with :specs ::r/excluded-keys))
+                        seconds (->> separated
+                                     (partition 2)
+                                     (mapv #(second %))
+                                     (cons plain-env-data)
+                                     vec)
+                        combined (apply combine seconds)
+                        merges (if-not (seq separated)
+                                 plain-env-data
+                                 combined)
+                        merges (reduce dissoc merges excluded)
+                        merges (-> merges
+                                   (update :id (comp vec distinct)))]
+                    (update merges :specs into specs))))
               ::spec
               (fn spec-tf [{:as env :keys [specs]}]
                 (if-not (seq specs)
@@ -64,42 +87,14 @@
                     (doseq [spec (map second s)]
                       (when-not (s/valid? spec env)
                         (throw
-                         (let [error-str (->> env ;; <- use ex-data/ex-info here?
+                         (let [error-str (->> env
                                               (s/explain-data spec)
-                                              :cljs.spec.alpha/problems
+                                              :clojure.spec.alpha/problems
                                               first
                                               :pred
                                               (str spec " "))]
                            (ex-info error-str {:error error-str :env env :spec spec})))))
-                    (assoc env :specs (vec (mapcat identity s))))))
-              ::with
-              (fn with-tf [{:as env :keys [with]}]
-                ;; (if-not (instance? WrapMap env) (throw (ex-info "with-tf: env is not a WrapMap!" {:env-type (type env), :env env}))) ; DIAGNOSTIC REMOVED
-                ;; (if-not (instance? WrapMap env) (throw (ex-info "with-tf: env is not a WrapMap!" {:env-type (type env), :env env}))) ; DIAGNOSTIC REMOVED
-                (if-not (seq with)
-                  env
-                  (let [separated (->> with reverse (mapcat #(do [(last (:id %)) %])) (apply separate))
-                        specs (:specs env [])
-                        ;; Ensure we are working with plain map data for combination
-                        plain-env-data (if (instance? com.jolygon.wrap_map.api_0.impl.WrapMap env) ; Check type before unwrap
-                                         (w/unwrap (dissoc env :with :specs))
-                                         (dissoc env :with :specs)) ; If already plain, just dissoc
-                        seconds (->> separated
-                                     (partition 2)
-                                     (mapv #(second %))
-                                     (cons plain-env-data) ;; Use plain data
-                                     vec)
-                        combined (apply combine seconds) ;; combine will receive plain map as first arg
-                        ;; The result of 'combine' is a plain map.
-                        ;; 'merges' should also be a plain map representing the new state of the environment.
-                        merges (if-not (seq separated)
-                                 plain-env-data ;; If no 'with', use the unwrapped current env data
-                                 combined)
-                        merges (-> merges
-                                   (update :id (comp vec distinct)))]
-                    ;; The function returns the new environment data (a plain map).
-                    ;; The preform loop in root.clj will use this for the next iteration.
-                    (update merges :specs into specs)))))))
+                    (assoc env :specs (vec (mapcat identity s)))))))))
 
 (comment
 

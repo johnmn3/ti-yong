@@ -2,16 +2,13 @@
   (:require
    [ti-yong.alpha.util :as u]
    [clojure.spec.alpha :as s]
-   [com.jolygon.wrap-map :as w])) ; Removed :refer
-  ;; (:import com.jolygon.wrap_map.api_0.impl.WrapMap)) ; For instance? check - REMOVING DIAGNOSTICS
+   [com.jolygon.wrap-map :as w]))
 
 ;; Forward declaration for preform
 (declare preform)
 
 (defn transformer-invoke [original-env & args]
-  (let [env (if (:instantiated? original-env)
-              original-env
-              (preform original-env))
+  (let [env (preform original-env)
         ;; Ensure args from the env are combined with passed-in args
         combined-args (concat (:args env) args)
         tf* (update env :op #(or % u/identities))
@@ -99,21 +96,13 @@
         {:error :invalid-env-preform
          :problems problems
          :env env}))))
-  (let [tf-pre-data (:tf-pre env) ;; This is the vector of [id fn] pairs
-        initialized-set (or (get env :init-set) #{})]
-    (if (or (:instantiated? env) (not (seq tf-pre-data)))
-      (assoc env :instantiated? true) ;; Mark as instantiated even if no tf-pre
-      (let [processed-env (reduce
-                           (fn [current-env [id tf-fn]]
-                             (if-not (initialized-set id)
-                               (let [next-env (tf-fn current-env)] ; result of spec-tf or with-tf
-                                 (-> next-env
-                                     (assoc :done-pre true)
-                                     (update :init-set (fnil conj #{}) id)))
-                               current-env))
-                           env
-                           (u/uniq-by first (partition 2 tf-pre-data)))]
-        (assoc processed-env :instantiated? true)))))
+  (let [tf-pre-data (:tf-pre env)]
+    (if (not (seq tf-pre-data))
+      env
+      (reduce (fn [current-env [_id tf-fn]]
+                (tf-fn current-env))
+              env
+              (u/uniq-by first (partition 2 tf-pre-data))))))
 
 (defn tform [env]
   (if-not (seq (:tf env))
@@ -167,4 +156,14 @@
                ;; or adjust spec. For now, transformer-invoke calls preform directly.
                ::tform-pre preform ;; Storing the function itself for spec validation if needed by other parts
               })
-      (w/assoc :invoke transformer-invoke)))
+      (w/assoc :invoke transformer-invoke
+               :assoc (fn [m k v]
+                        (let [new-m (assoc m k v)]
+                          (if-let [excluded (::excluded-keys new-m)]
+                            (if (excluded k)
+                              (assoc new-m ::excluded-keys (disj excluded k))
+                              new-m)
+                            new-m)))
+               :dissoc (fn [m k]
+                         (-> (dissoc m k)
+                             (update ::excluded-keys (fnil conj #{}) k))))))

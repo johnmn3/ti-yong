@@ -56,6 +56,27 @@
       (update :id conj ::transformer)
       (assoc :with [] :specs [::transformer ::transformer])
       (update :tf-pre conj
+              ::with
+              (fn with-tf [{:as env :keys [with]}]
+                (if-not (seq with)
+                  env
+                  (let [separated (->> with reverse (mapcat #(do [(last (:id %)) %])) (apply separate))
+                        excluded (::r/excluded-keys env #{})
+                        specs (:specs env [])
+                        plain-env-data (dissoc env :with :specs ::r/excluded-keys)
+                        seconds (->> separated
+                                     (partition 2)
+                                     (mapv #(second %))
+                                     (cons plain-env-data)
+                                     vec)
+                        combined (apply combine seconds)
+                        merges (if-not (seq separated)
+                                 plain-env-data
+                                 combined)
+                        merges (reduce dissoc merges excluded)
+                        merges (-> merges
+                                   (update :id (comp vec distinct)))]
+                    (update merges :specs into specs))))
               ::spec
               (fn spec-tf [{:as env :keys [specs]}]
                 (if-not (seq specs)
@@ -64,28 +85,13 @@
                     (doseq [spec (map second s)]
                       (when-not (s/valid? spec env)
                         (throw
-                         (js/Error. (->> env ;; <- use ex-data/ex-info here?
+                         (js/Error. (->> env
                                          (s/explain-data spec)
                                          :cljs.spec.alpha/problems
                                          first
                                          :pred
                                          (str spec " "))))))
-                    (assoc env :specs (vec (mapcat identity s))))))
-              ::with
-              (fn with-tf [{:as env :keys [with]}]
-                (if-not (seq with)
-                  env
-                  (let [separated (->> with reverse (mapcat #(do [(last (:id %)) %])) (apply separate))
-                        specs (:specs env [])
-                        merges  (if-not (seq separated)
-                                  env
-                                  (->> separated
-                                       (partition 2)
-                                       (mapv #(second %))
-                                       (#(apply combine (into % [(dissoc env :with :specs)])))))
-                        merges (-> merges
-                                   (update :id (comp vec distinct)))]
-                    (update merges :specs into specs)))))))
+                    (assoc env :specs (vec (mapcat identity s)))))))))
 
 (comment
 

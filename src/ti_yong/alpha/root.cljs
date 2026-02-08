@@ -8,9 +8,7 @@
 (declare preform)
 
 (defn transformer-invoke [original-env & args]
-  (let [env (if (:instantiated? original-env)
-              original-env
-              (preform original-env))
+  (let [env (preform original-env)
         ;; Ensure args from the env are combined with passed-in args
         combined-args (concat (:args env) args)
         tf* (update env :op #(or % u/identities))
@@ -89,21 +87,13 @@
 (defn preform [env]
   (when-not (s/valid? ::root-data env)
     (throw (js/Error. (str "Invalid env for preform: " (:cljs.spec.alpha/problems (s/explain-data ::root-data env))))))
-  (let [tf-pre-data (:tf-pre env) ;; This is the vector of [id fn] pairs
-        initialized-set (or (get env :init-set) #{})]
-    (if (or (:instantiated? env) (not (seq tf-pre-data)))
-      (assoc env :instantiated? true) ;; Mark as instantiated even if no tf-pre
-      (let [processed-env (reduce
-                           (fn [current-env [id tf-fn]]
-                             (if-not (initialized-set id)
-                               (let [next-env (tf-fn current-env)]
-                                 (-> next-env
-                                     (assoc :done-pre true)
-                                     (update :init-set (fnil conj #{}) id))) ; Corrected '->' form
-                               current-env)) ; else for if-not
-                           env
-                           (u/uniq-by first (partition 2 tf-pre-data)))] ; Corrected to 3 trailing )
-        (assoc processed-env :instantiated? true)))))
+  (let [tf-pre-data (:tf-pre env)]
+    (if (not (seq tf-pre-data))
+      env
+      (reduce (fn [current-env [_id tf-fn]]
+                (tf-fn current-env))
+              env
+              (u/uniq-by first (partition 2 tf-pre-data))))))
 
 (defn tform [env]
   (if-not (seq (:tf env))
@@ -152,7 +142,17 @@
                :tf-end []
                ::tform-pre preform ;; Storing the function itself
               })
-      (w/assoc :invoke transformer-invoke)))
+      (w/assoc :invoke transformer-invoke
+               :assoc (fn [m k v]
+                        (let [new-m (assoc m k v)]
+                          (if-let [excluded (::excluded-keys new-m)]
+                            (if (excluded k)
+                              (assoc new-m ::excluded-keys (disj excluded k))
+                              new-m)
+                            new-m)))
+               :dissoc (fn [m k]
+                         (-> (dissoc m k)
+                             (update ::excluded-keys (fnil conj #{}) k))))))
 
 (comment
   ;; Commented out dyna-map specific requires and examples
