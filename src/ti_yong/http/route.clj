@@ -17,16 +17,18 @@
 (defn- path-to-regex
   "Convert a path pattern like '/items/:id' to a regex pattern and param names."
   [path]
-  (let [segments (str/split path #"/")
-        param-names (atom [])
-        regex-parts (mapv (fn [seg]
-                            (if (str/starts-with? seg ":")
-                              (do (swap! param-names conj (subs seg 1))
-                                  "([^/]+)")
-                              (java.util.regex.Pattern/quote seg)))
-                          segments)]
-    {:regex (re-pattern (str "^" (str/join "/" regex-parts) "$"))
-     :param-names @param-names}))
+  (if (= "/" path)
+    {:regex #"^/$" :param-names []}
+    (let [segments (str/split path #"/")
+          param-names (atom [])
+          regex-parts (mapv (fn [seg]
+                              (if (str/starts-with? seg ":")
+                                (do (swap! param-names conj (subs seg 1))
+                                    "([^/]+)")
+                                (java.util.regex.Pattern/quote seg)))
+                            segments)]
+      {:regex (re-pattern (str "^" (str/join "/" regex-parts) "$"))
+       :param-names @param-names})))
 
 (defn expand-routes
   "Expand route definition vectors into route maps.

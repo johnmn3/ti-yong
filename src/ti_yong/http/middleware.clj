@@ -129,9 +129,51 @@
 
             ;; Array
             (str/starts-with? s "[")
-            (let [inner (subs s 1 (dec (count s)))]
-              ;; Simple split for arrays (doesn't handle nested)
-              (->> (str/split inner #",")
+            (let [inner (subs s 1 (dec (count s)))
+                  ;; Split by commas not inside quotes, braces, or brackets
+                  items (loop [chars (seq inner)
+                               current []
+                               depth 0
+                               in-string? false
+                               result []]
+                          (if (empty? chars)
+                            (if (seq current)
+                              (conj result (apply str current))
+                              result)
+                            (let [c (first chars)
+                                  escape? (and in-string? (= c \\))]
+                              (cond
+                                escape?
+                                (recur (drop 2 chars)
+                                       (conj current c (second chars))
+                                       depth in-string? result)
+
+                                (and (= c \") (not escape?))
+                                (recur (rest chars)
+                                       (conj current c)
+                                       depth (not in-string?) result)
+
+                                (and (not in-string?) (or (= c \{) (= c \[)))
+                                (recur (rest chars)
+                                       (conj current c)
+                                       (inc depth) in-string? result)
+
+                                (and (not in-string?) (or (= c \}) (= c \])))
+                                (recur (rest chars)
+                                       (conj current c)
+                                       (dec depth) in-string? result)
+
+                                (and (not in-string?) (zero? depth) (= c \,))
+                                (recur (rest chars)
+                                       []
+                                       depth in-string?
+                                       (conj result (apply str current)))
+
+                                :else
+                                (recur (rest chars)
+                                       (conj current c)
+                                       depth in-string? result)))))]
+              (->> items
                    (map str/trim)
                    (filter seq)
                    (mapv simple-json-parse)))
@@ -263,3 +305,201 @@
                 (if (nil? (:res env))
                   (assoc env :res {:status 404 :headers {} :body default-body})
                   env)))))
+
+;; --- Form Params ---
+
+(defn- parse-form-body
+  "Parse application/x-www-form-urlencoded body into a map."
+  [body]
+  (if (or (nil? body) (and (string? body) (str/blank? body)))
+    {}
+    (let [s (if (string? body) body (slurp body))]
+      (if (str/blank? s)
+        {}
+        (->> (str/split s #"&")
+             (map #(str/split % #"=" 2))
+             (reduce (fn [m [k v]]
+                       (assoc m
+                              (java.net.URLDecoder/decode (or k "") "UTF-8")
+                              (java.net.URLDecoder/decode (or v "") "UTF-8")))
+                     {}))))))
+
+(defn- form-content-type? [headers]
+  (when-let [ct (get headers "content-type")]
+    (str/includes? ct "application/x-www-form-urlencoded")))
+
+(def form-params
+  "Middleware that parses form-encoded bodies into :form-params."
+  (-> t/transformer
+      (update :id conj ::form-params)
+      (update :tf conj
+              ::form-params
+              (fn [env]
+                (if (form-content-type? (:headers env))
+                  (assoc env :form-params (parse-form-body (:body env)))
+                  env)))))
+
+;; --- Body Params (unified) ---
+
+(defn- read-body-string
+  "Read body as a string. Handles String and InputStream."
+  [body]
+  (cond
+    (string? body) body
+    (instance? java.io.InputStream body) (slurp body)
+    :else nil))
+
+(def body-params
+  "Middleware that parses body based on content-type into :body-params.
+   Supports JSON and form-encoded bodies."
+  (-> t/transformer
+      (update :id conj ::body-params)
+      (update :tf conj
+              ::body-params
+              (fn [env]
+                (let [headers (:headers env)
+                      body (read-body-string (:body env))]
+                  (cond
+                    (and body (json-content-type? headers))
+                    (let [parsed (simple-json-parse body)]
+                      (assoc env :body-params parsed :json-params parsed))
+
+                    (and body (form-content-type? headers))
+                    (let [parsed (parse-form-body body)]
+                      (assoc env :body-params parsed :form-params parsed))
+
+                    :else env))))))
+
+;; --- Keyword Params ---
+
+(defn- keywordize-keys-shallow [m]
+  (when m
+    (reduce-kv (fn [acc k v]
+                 (assoc acc (if (string? k) (keyword k) k) v))
+               {} m)))
+
+(def keyword-params
+  "Middleware that keywordizes string keys in :query-params, :body-params, :form-params."
+  (-> t/transformer
+      (update :id conj ::keyword-params)
+      (update :tf conj
+              ::keyword-params
+              (fn [env]
+                (cond-> env
+                  (:query-params env)
+                  (update :query-params keywordize-keys-shallow)
+                  (:body-params env)
+                  (update :body-params keywordize-keys-shallow)
+                  (:form-params env)
+                  (update :form-params keywordize-keys-shallow)
+                  (:json-params env)
+                  (update :json-params keywordize-keys-shallow))))))
+
+;; --- Content Negotiation ---
+
+(defn- parse-accept
+  "Parse Accept header into ordered list of media types."
+  [accept-header]
+  (when accept-header
+    (->> (str/split accept-header #",")
+         (map str/trim)
+         (map (fn [entry]
+                (let [[type & params] (str/split entry #";")
+                      q (or (some->> params
+                                      (map str/trim)
+                                      (filter #(str/starts-with? % "q="))
+                                      first
+                                      (re-find #"[\d.]+")
+                                      Double/parseDouble)
+                            1.0)]
+                  {:type (str/trim type) :q q})))
+         (sort-by :q >)
+         (mapv :type))))
+
+(defn content-negotiation
+  "Middleware that inspects Accept header and auto-serializes response.
+   Supported formats: application/json, application/edn, text/html, text/plain."
+  []
+  (-> t/transformer
+      (update :id conj ::content-negotiation)
+      (update :tf conj
+              ::content-negotiation-parse
+              (fn [env]
+                (let [accept (get-in env [:headers "accept"])
+                      types (parse-accept accept)]
+                  (assoc env ::accept-types (or types ["*/*"])))))
+      (update :tf-end conj
+              ::content-negotiation-respond
+              (fn [env]
+                (let [res (:res env)
+                      types (::accept-types env ["*/*"])]
+                  (if-not (and (map? res) (:body res))
+                    env
+                    (let [body (:body res)
+                          preferred (first types)]
+                      (cond
+                        ;; Already has Content-Type - don't override
+                        (get-in res [:headers "Content-Type"])
+                        env
+
+                        ;; JSON requested and body is data
+                        (and (or (= preferred "application/json")
+                                 (= preferred "*/*"))
+                             (or (map? body) (sequential? body)))
+                        (assoc env :res
+                               (-> res
+                                   (assoc :body (serialize-json body))
+                                   (assoc-in [:headers "Content-Type"] "application/json")))
+
+                        ;; EDN requested
+                        (= preferred "application/edn")
+                        (assoc env :res
+                               (-> res
+                                   (assoc :body (pr-str body))
+                                   (assoc-in [:headers "Content-Type"] "application/edn")))
+
+                        ;; HTML requested
+                        (= preferred "text/html")
+                        (assoc env :res
+                               (assoc-in res [:headers "Content-Type"] "text/html"))
+
+                        :else env))))))))
+
+;; --- HTML Body ---
+
+(def html-body
+  "Middleware that sets Content-Type to text/html on response maps."
+  (-> t/transformer
+      (update :id conj ::html-body)
+      (update :tf-end conj
+              ::html-body
+              (fn [env]
+                (let [res (:res env)]
+                  (if (and (map? res) (not (get-in res [:headers "Content-Type"])))
+                    (assoc env :res (assoc-in res [:headers "Content-Type"] "text/html"))
+                    env))))))
+
+;; --- JSON Body Response ---
+
+(def json-body-response
+  "Middleware that serializes response body to JSON and sets Content-Type.
+   Unlike json-response (which works on raw :out), this works on :res response maps."
+  (-> t/transformer
+      (update :id conj ::json-body-response)
+      (update :tf-end conj
+              ::json-body-response
+              (fn [env]
+                (let [res (:res env)]
+                  (if (and (map? res)
+                           (or (map? (:body res)) (sequential? (:body res)))
+                           (not (get-in res [:headers "Content-Type"])))
+                    (assoc env :res
+                           (-> res
+                               (assoc :body (serialize-json (:body res)))
+                               (assoc-in [:headers "Content-Type"] "application/json")))
+                    env))))))
+
+;; --- Public JSON helpers ---
+
+(def parse-json-string simple-json-parse)
+(def serialize-json-string serialize-json)

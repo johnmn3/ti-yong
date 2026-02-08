@@ -87,3 +87,33 @@
   "Middleware that parses query strings."
   []
   mw/query-params)
+
+(defn body-params-middleware
+  "Middleware that parses request body (JSON or form-encoded) into :body-params."
+  []
+  mw/body-params)
+
+(defn form-params-middleware
+  "Middleware that parses form-encoded bodies into :form-params."
+  []
+  mw/form-params)
+
+(defn keyword-params-middleware
+  "Middleware that keywordizes string keys in parsed params."
+  []
+  mw/keyword-params)
+
+(defn content-negotiation-middleware
+  "Middleware that auto-serializes responses based on Accept header."
+  []
+  (mw/content-negotiation))
+
+(defn html-body-middleware
+  "Middleware that sets Content-Type to text/html on responses."
+  []
+  mw/html-body)
+
+(defn json-body-response-middleware
+  "Middleware that serializes response body to JSON and sets Content-Type."
+  []
+  mw/json-body-response)
