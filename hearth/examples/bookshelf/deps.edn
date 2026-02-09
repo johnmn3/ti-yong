@@ -1,0 +1,21 @@
+{:paths ["src" "resources"]
+ :deps {;; hearth framework (parent directory)
+        johnmn3/hearth {:local/root "../.."}
+
+        ;; Clojure core
+        org.clojure/clojure {:mvn/version "1.11.2"}
+        org.clojure/core.async {:mvn/version "1.8.741"}
+
+        ;; Transit serialization
+        com.cognitect/transit-clj {:mvn/version "1.0.333"}
+
+        ;; Jetty web server (Ring adapter)
+        ring/ring-jetty-adapter {:mvn/version "1.13.0"}
+        ring/ring-core {:mvn/version "1.13.0"}
+
+        ;; Logging
+        org.slf4j/slf4j-simple {:mvn/version "2.0.16"}}
+
+ :aliases
+ {:run
+  {:main-opts ["-m" "bookshelf.server"]}}}
