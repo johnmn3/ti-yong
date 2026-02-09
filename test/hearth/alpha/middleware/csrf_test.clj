@@ -4,6 +4,15 @@
    [hearth.alpha.middleware :as mw]
    [hearth.alpha.service :as svc]))
 
+(defn- extract-session-id
+  "Extract session ID from Set-Cookie header (vector or string)."
+  [set-cookie]
+  (let [cookies (cond
+                  (vector? set-cookie) set-cookie
+                  (string? set-cookie) [set-cookie]
+                  :else [])]
+    (some #(second (re-find #"hearth-session=([^;]+)" %)) cookies)))
+
 (deftest csrf-blocks-unsafe-without-token-test
   (testing "POST without CSRF token returns 403"
     (let [store (mw/memory-store)
@@ -46,7 +55,7 @@
           get-resp (svc/response-for svc :get "/form")
           token (:body get-resp)
           set-cookie (get-in get-resp [:headers "Set-Cookie"])
-          session-id (second (re-find #"hearth-session=([^;]+)" set-cookie))
+          session-id (extract-session-id set-cookie)
           ;; Step 2: POST with valid token via header
           post-resp (svc/response-for svc :post "/submit"
                       {:headers {"cookie" (str "hearth-session=" session-id)
@@ -69,9 +78,33 @@
           ;; GET to establish session
           get-resp (svc/response-for svc :get "/form")
           set-cookie (get-in get-resp [:headers "Set-Cookie"])
-          session-id (second (re-find #"hearth-session=([^;]+)" set-cookie))
+          session-id (extract-session-id set-cookie)
           ;; POST with wrong token
           post-resp (svc/response-for svc :post "/submit"
                       {:headers {"cookie" (str "hearth-session=" session-id)
                                  "x-csrf-token" "wrong-token"}})]
       (is (= 403 (:status post-resp))))))
+
+(deftest csrf-blocks-put-without-token-test
+  (testing "PUT without CSRF token returns 403"
+    (let [store (mw/memory-store)
+          svc (svc/service
+               {:routes [["/update" :put
+                          (fn [_] {:status 200 :body "ok"})
+                          :route-name ::update]]
+                :with [mw/cookies (mw/session {:store store})
+                       mw/query-params (mw/csrf)]})
+          resp (svc/response-for svc :put "/update")]
+      (is (= 403 (:status resp))))))
+
+(deftest csrf-blocks-delete-without-token-test
+  (testing "DELETE without CSRF token returns 403"
+    (let [store (mw/memory-store)
+          svc (svc/service
+               {:routes [["/remove" :delete
+                          (fn [_] {:status 200 :body "ok"})
+                          :route-name ::remove]]
+                :with [mw/cookies (mw/session {:store store})
+                       mw/query-params (mw/csrf)]})
+          resp (svc/response-for svc :delete "/remove")]
+      (is (= 403 (:status resp))))))

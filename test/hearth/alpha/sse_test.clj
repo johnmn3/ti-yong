@@ -72,3 +72,34 @@
       (let [output (.toString baos "UTF-8")]
         (dotimes [i 5]
           (is (clojure.string/includes? output (str "data: event-" i "\n\n"))))))))
+
+(deftest event-stream-heartbeat-sends-comments-test
+  (testing "heartbeat sends SSE comment lines"
+    (let [handler (sse/event-stream
+                   (fn [ch env]
+                     ;; Wait a bit then close
+                     (future
+                       (Thread/sleep 150)
+                       (a/close! ch)))
+                   {:heartbeat-ms 50})
+          resp (handler {:request-method :get :uri "/events"})
+          baos (java.io.ByteArrayOutputStream.)]
+      ((:body resp) baos)
+      (let [output (.toString baos "UTF-8")]
+        ;; Should have at least one heartbeat comment
+        (is (clojure.string/includes? output ":\n\n"))))))
+
+(deftest virtual-event-stream-works-test
+  (testing "virtual-event-stream produces same output as event-stream"
+    (let [handler (sse/virtual-event-stream
+                   (fn [ch env]
+                     (a/>!! ch "hello")
+                     (a/close! ch))
+                   {:heartbeat-ms nil})
+          resp (handler {:request-method :get :uri "/events"})
+          baos (java.io.ByteArrayOutputStream.)]
+      (is (= 200 (:status resp)))
+      (is (= "text/event-stream" (get-in resp [:headers "Content-Type"])))
+      ((:body resp) baos)
+      (let [output (.toString baos "UTF-8")]
+        (is (clojure.string/includes? output "data: hello\n\n"))))))

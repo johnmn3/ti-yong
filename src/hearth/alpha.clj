@@ -216,6 +216,11 @@
   [opts]
   (mw/file opts))
 
+(defn fast-resource-middleware
+  "Middleware that serves classpath resources with in-memory caching and ETag support."
+  [opts]
+  (mw/fast-resource opts))
+
 (def format-sse-event
   "Format an event map as SSE text."
   mw/format-sse-event)
@@ -242,6 +247,11 @@
 (def event-stream
   "Create an SSE handler. See hearth.alpha.sse/event-stream for details."
   sse/event-stream)
+
+(def virtual-event-stream
+  "Create an SSE handler using virtual threads (Java 21+).
+   See hearth.alpha.sse/virtual-event-stream for details."
+  sse/virtual-event-stream)
 
 ;; --- WebSocket ---
 

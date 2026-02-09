@@ -4,7 +4,10 @@
    [cognitect.transit :as transit]
    [ti-yong.alpha.transformer :as t])
   (:import
-   [java.io ByteArrayInputStream ByteArrayOutputStream]))
+   [java.io ByteArrayInputStream ByteArrayOutputStream]
+   [java.time Instant ZonedDateTime]
+   [java.time.format DateTimeFormatter]
+   [java.util Locale]))
 
 ;; Middleware are transformers intended to be composed via :with.
 ;; Each middleware adds steps to :tf (env transforms), :out (response transforms),
@@ -613,7 +616,7 @@
                                  (update :headers
                                          (fn [h]
                                            (assoc h "Set-Cookie"
-                                                  (str/join ", " set-cookie-headers)))))))
+                                                  set-cookie-headers))))))
                     env))))))
 
 ;; --- Session ---
@@ -674,9 +677,10 @@
                                            (fn [h]
                                              (let [existing (get h "Set-Cookie")]
                                                (assoc h "Set-Cookie"
-                                                      (if existing
-                                                        (str existing ", " set-cookie-str)
-                                                        set-cookie-str))))))
+                                                      (cond
+                                                        (nil? existing) [set-cookie-str]
+                                                        (vector? existing) (conj existing set-cookie-str)
+                                                        :else [existing set-cookie-str]))))))
                                res)]
                      (assoc env :res res))))))))
 
@@ -724,57 +728,136 @@
   (when content-type
     (second (re-find #"boundary=(.+)" content-type))))
 
+(defn- index-of-bytes
+  "Find the index of needle byte array in haystack starting at from-index.
+   Returns -1 if not found."
+  ^long [^bytes haystack ^bytes needle ^long from-index]
+  (let [hlen (alength haystack)
+        nlen (alength needle)
+        limit (- hlen nlen)]
+    (loop [i from-index]
+      (if (> i limit)
+        -1
+        (if (loop [j 0]
+              (if (= j nlen)
+                true
+                (if (= (aget haystack (+ i j)) (aget needle j))
+                  (recur (inc j))
+                  false)))
+          i
+          (recur (inc i)))))))
+
+(def ^:private ^bytes crlf-crlf (.getBytes "\r\n\r\n" "US-ASCII"))
+
+(defn- parse-part-headers
+  "Parse the header section of a multipart part (as bytes) into header strings."
+  [^bytes header-bytes]
+  (let [header-str (String. header-bytes "UTF-8")
+        lines (str/split-lines header-str)]
+    (reduce (fn [m line]
+              (let [colon-idx (str/index-of line ":")]
+                (if colon-idx
+                  (assoc m
+                         (str/lower-case (str/trim (subs line 0 colon-idx)))
+                         (str/trim (subs line (inc colon-idx))))
+                  m)))
+            {}
+            lines)))
+
 (defn- parse-multipart-body
-  "Parse a multipart/form-data body string into a map of parts.
+  "Parse a multipart/form-data body into a map of parts.
+   Works with raw bytes to avoid binary corruption for file uploads.
    Each part is either a string value or a map with :filename, :content-type, :bytes."
   [body boundary]
   (when (and body boundary)
-    (let [body-str (if (string? body) body (slurp body))
-          delimiter (str "--" boundary)
-          parts (-> body-str
-                    (str/split (re-pattern (java.util.regex.Pattern/quote delimiter)))
-                    rest)  ;; first element is empty before first boundary
-          parts (remove #(or (str/blank? %) (str/starts-with? (str/trim %) "--")) parts)]
-      (reduce
-       (fn [m part]
-         (let [part (str/trim part)
-               [headers-section body-section] (str/split part #"\r?\n\r?\n" 2)]
-           (when (and headers-section body-section)
-             (let [disp-line (->> (str/split-lines headers-section)
-                                  (filter #(str/starts-with?
-                                            (str/lower-case %) "content-disposition"))
-                                  first)
-                   name-match (when disp-line
-                                (second (re-find #"name=\"([^\"]+)\"" disp-line)))
-                   filename-match (when disp-line
-                                    (second (re-find #"filename=\"([^\"]+)\"" disp-line)))
-                   ct-line (->> (str/split-lines headers-section)
-                                (filter #(str/starts-with?
-                                          (str/lower-case %) "content-type"))
-                                first)
-                   part-ct (when ct-line
-                             (str/trim (second (str/split ct-line #":" 2))))]
-               (if name-match
-                 (assoc m name-match
-                        (if filename-match
-                          {:filename filename-match
-                           :content-type (or part-ct "application/octet-stream")
-                           :bytes (.getBytes ^String (str/trim body-section) "UTF-8")
-                           :size (count (.getBytes ^String (str/trim body-section) "UTF-8"))}
-                          (str/trim body-section)))
-                 m)))))
-       {}
-       parts))))
+    (let [^bytes body-bytes (cond
+                              (bytes? body) body
+                              (string? body) (.getBytes ^String body "UTF-8")
+                              (instance? java.io.InputStream body)
+                              (.readAllBytes ^java.io.InputStream body)
+                              :else nil)]
+      (when body-bytes
+        (let [delim (.getBytes (str "--" boundary) "US-ASCII")
+              dlen (alength delim)
+              blen (alength body-bytes)]
+          ;; Find all boundary positions
+          (loop [pos 0
+                 result {}]
+            (let [bnd-pos (index-of-bytes body-bytes delim pos)]
+              (if (= bnd-pos -1)
+                result
+                ;; Skip past the boundary + \r\n
+                (let [after-delim (+ bnd-pos dlen)]
+                  ;; Check for closing delimiter --
+                  (if (and (< (inc after-delim) blen)
+                           (= (aget body-bytes after-delim) (byte 0x2d))
+                           (= (aget body-bytes (inc after-delim)) (byte 0x2d)))
+                    result ;; End of multipart
+                    ;; Skip \r\n after boundary
+                    (let [part-start (cond
+                                      (and (< (inc after-delim) blen)
+                                           (= (aget body-bytes after-delim) (byte 0x0d))
+                                           (= (aget body-bytes (inc after-delim)) (byte 0x0a)))
+                                      (+ after-delim 2)
+                                      (and (< after-delim blen)
+                                           (= (aget body-bytes after-delim) (byte 0x0a)))
+                                      (inc after-delim)
+                                      :else after-delim)
+                          ;; Find header/body separator (\r\n\r\n)
+                          hdr-end (index-of-bytes body-bytes crlf-crlf part-start)]
+                      (if (= hdr-end -1)
+                        result
+                        (let [hdr-bytes (java.util.Arrays/copyOfRange body-bytes (int part-start) (int hdr-end))
+                              body-start (+ hdr-end 4) ;; skip \r\n\r\n
+                              ;; Find next boundary to know where body ends
+                              next-bnd (index-of-bytes body-bytes delim body-start)
+                              ;; Body ends 2 bytes before next boundary (\r\n before --)
+                              body-end (if (= next-bnd -1)
+                                         blen
+                                         (let [e (- next-bnd 2)]
+                                           (if (and (>= e body-start)
+                                                    (= (aget body-bytes e) (byte 0x0d))
+                                                    (= (aget body-bytes (inc e)) (byte 0x0a)))
+                                             e
+                                             next-bnd)))
+                              part-body-bytes (java.util.Arrays/copyOfRange
+                                               body-bytes (int body-start) (int body-end))
+                              headers (parse-part-headers hdr-bytes)
+                              disp (get headers "content-disposition" "")
+                              name-match (second (re-find #"name=\"([^\"]+)\"" disp))
+                              filename-match (second (re-find #"filename=\"([^\"]+)\"" disp))
+                              part-ct (get headers "content-type")]
+                          (if name-match
+                            (recur (if (= next-bnd -1) blen next-bnd)
+                                   (assoc result name-match
+                                          (if filename-match
+                                            {:filename filename-match
+                                             :content-type (or part-ct "application/octet-stream")
+                                             :bytes part-body-bytes
+                                             :size (alength part-body-bytes)}
+                                            (String. part-body-bytes "UTF-8"))))
+                            (recur (if (= next-bnd -1) blen next-bnd)
+                                   result)))))))))))))))
 
 (defn- multipart-content-type?
   [headers]
   (when-let [ct (get headers "content-type")]
     (str/includes? ct "multipart/form-data")))
 
+(defn- body-to-bytes
+  "Convert body to byte array for size checking."
+  ^bytes [body]
+  (cond
+    (bytes? body) body
+    (string? body) (.getBytes ^String body "UTF-8")
+    (instance? java.io.InputStream body)
+    (.readAllBytes ^java.io.InputStream body)
+    :else nil))
+
 (defn multipart-params
   "Middleware that parses multipart/form-data request bodies.
    Options:
-     :max-size - maximum body size in bytes (default 10MB)"
+     :max-size - maximum body size in bytes (default 10MB). Enforced before parsing."
   ([] (multipart-params {}))
   ([{:keys [max-size] :or {max-size (* 10 1024 1024)}}]
    (-> t/transformer
@@ -787,8 +870,15 @@
                          boundary (parse-multipart-boundary ct)
                          body (:body env)]
                      (if (and boundary body)
-                       (let [parsed (parse-multipart-body body boundary)]
-                         (assoc env :multipart-params parsed))
+                       (let [^bytes body-bytes (body-to-bytes body)]
+                         (if (and max-size body-bytes (> (alength body-bytes) ^long max-size))
+                           ;; Short-circuit with 413
+                           (assoc env :env-op
+                                  (constantly {:status 413
+                                               :headers {}
+                                               :body "Request Entity Too Large"}))
+                           (let [parsed (parse-multipart-body body-bytes boundary)]
+                             (assoc env :multipart-params parsed))))
                        env))
                    env))))))
 
@@ -850,13 +940,17 @@
 
 ;; --- Not Modified (304) ---
 
+(def ^:private http-date-formatter
+  "Thread-safe, locale-explicit HTTP date formatter (RFC 1123)."
+  (DateTimeFormatter/ofPattern "EEE, dd MMM yyyy HH:mm:ss zzz" Locale/ENGLISH))
+
 (defn- parse-http-date
-  "Parse an HTTP date string to epoch millis. Returns nil on failure."
+  "Parse an HTTP date string to epoch millis. Returns nil on failure.
+   Uses DateTimeFormatter (thread-safe, explicit English locale)."
   [date-str]
   (try
     (when date-str
-      (.getTime (.parse (java.text.SimpleDateFormat. "EEE, dd MMM yyyy HH:mm:ss zzz")
-                         date-str)))
+      (.toEpochMilli (Instant/from (.parse http-date-formatter date-str))))
     (catch Exception _ nil)))
 
 (def not-modified
@@ -964,6 +1058,62 @@
                                                    "Content-Length" (str (.length f))}
                                          :body (java.io.FileInputStream. f)})
                         env))))))))
+
+;; --- Fast Resource (classpath with caching) ---
+
+(defn- resource-etag
+  "Generate an ETag from resource content bytes."
+  [^bytes content-bytes]
+  (let [hash (Integer/toHexString (java.util.Arrays/hashCode content-bytes))]
+    (str "\"" hash "\"")))
+
+(defn fast-resource
+  "Middleware that serves classpath resources with in-memory caching and ETag support.
+   Cached responses are served with ETag and Cache-Control headers for efficient
+   conditional requests (works with not-modified middleware for 304s).
+   Options:
+     :prefix     - classpath prefix (default: 'public')
+     :max-age    - Cache-Control max-age in seconds (default: 86400)
+     :cache-size - max cached entries (default: 256)"
+  [{:keys [prefix max-age cache-size]
+    :or {prefix "public" max-age 86400 cache-size 256}}]
+  (let [cache (atom {})] ;; path -> {:headers h :bytes b}
+    (-> t/transformer
+        (update :id conj ::fast-resource)
+        (update :tf-end conj
+                ::fast-resource
+                (fn [env]
+                  (let [res (:res env)]
+                    (if (and res (map? res) (not= 404 (:status res)))
+                      env
+                      (let [uri (:uri env)
+                            path (str prefix uri)
+                            safe? (not (str/includes? path ".."))]
+                        (if-not safe?
+                          env
+                          (let [cached (get @cache path)]
+                            (if cached
+                              ;; Serve from cache — create fresh InputStream each time
+                              (assoc env :res {:status 200
+                                              :headers (:headers cached)
+                                              :body (ByteArrayInputStream. ^bytes (:bytes cached))})
+                              ;; Try loading from classpath
+                              (let [rsrc (clojure.java.io/resource path)]
+                                (if-not rsrc
+                                  env
+                                  (let [content-bytes (with-open [is (clojure.java.io/input-stream rsrc)]
+                                                       (.readAllBytes ^java.io.InputStream is))
+                                        etag (resource-etag content-bytes)
+                                        hdrs {"Content-Type" (mime-type-for path)
+                                              "Content-Length" (str (alength content-bytes))
+                                              "ETag" etag
+                                              "Cache-Control" (str "public, max-age=" max-age)}]
+                                    ;; Cache if under limit
+                                    (when (< (count @cache) cache-size)
+                                      (swap! cache assoc path {:headers hdrs :bytes content-bytes}))
+                                    (assoc env :res {:status 200
+                                                     :headers hdrs
+                                                     :body (ByteArrayInputStream. content-bytes)})))))))))))))))
 
 ;; --- SSE Event Formatting ---
 
