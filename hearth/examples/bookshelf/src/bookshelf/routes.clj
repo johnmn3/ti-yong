@@ -21,91 +21,75 @@
 ;; This demonstrates composing different transformer pipelines per route.
 
 (def ^:private json-api
-  "Standard JSON API middleware: parses body, keywordizes params, returns JSON."
   [mw/body-params
    mw/keyword-params
    mw/json-body-response])
 
 (def ^:private json-read
-  "Read-only JSON API: parses query params, keywordizes, returns JSON."
   [mw/query-params
    mw/keyword-params
    mw/json-body-response])
 
 (def ^:private paginated-read
-  "Paginated read: adds pagination params on top of json-read."
   [mw/query-params
    mw/keyword-params
    (app-mw/pagination-params)
    mw/json-body-response])
 
 (def ^:private auth-read
-  "Authenticated read: adds auth check to paginated-read."
   [mw/query-params
    mw/keyword-params
-   (app-mw/authenticate)
-   (app-mw/require-auth)
+   app-mw/authenticate
+   app-mw/require-auth
    mw/json-body-response])
 
 (def ^:private auth-write
-  "Authenticated write: JSON body parsing + auth."
   [mw/body-params
    mw/keyword-params
-   (app-mw/authenticate)
-   (app-mw/require-auth)
+   app-mw/authenticate
+   app-mw/require-auth
    mw/json-body-response])
 
 (def ^:private admin-write
-  "Admin write: auth + admin role required."
   [mw/body-params
    mw/keyword-params
-   (app-mw/authenticate)
-   (app-mw/require-auth)
+   app-mw/authenticate
+   app-mw/require-auth
    (app-mw/require-role :admin)
    mw/json-body-response])
 
 (def ^:private admin-read
-  "Admin read: auth + admin role required."
   [mw/query-params
    mw/keyword-params
-   (app-mw/authenticate)
-   (app-mw/require-auth)
+   app-mw/authenticate
+   app-mw/require-auth
    (app-mw/require-role :admin)
    (app-mw/pagination-params)
    mw/json-body-response])
 
 (def ^:private moderator-write
-  "Moderator write: auth + admin or moderator role."
   [mw/body-params
    mw/keyword-params
-   (app-mw/authenticate)
-   (app-mw/require-auth)
+   app-mw/authenticate
+   app-mw/require-auth
    (app-mw/require-role :admin :moderator)
    mw/json-body-response])
 
-(defn- load-book
-  "Route middleware that loads a book by :id path param."
-  []
+;; --- Entity loaders (parameterized, so still defn→def-with-call) ---
+
+(def ^:private load-book
   (app-mw/load-entity db/books :book "Book"))
 
-(defn- load-author
-  "Route middleware that loads an author by :id path param."
-  []
+(def ^:private load-author
   (app-mw/load-entity db/authors :author "Author"))
 
-(defn- load-review
-  "Route middleware that loads a review by :id path param."
-  []
+(def ^:private load-review
   (app-mw/load-entity db/reviews :review "Review"))
 
-(defn- load-target-user
-  "Route middleware that loads a target user by :id path param."
-  []
+(def ^:private load-target-user
   (app-mw/load-entity db/users :target-user "User"))
 
-(defn- load-reading-list
-  "Route middleware that loads a reading list by :id path param."
-  []
+(def ^:private load-reading-list
   (app-mw/load-entity db/reading-lists :reading-list "Reading list"))
 
 (def routes
@@ -145,62 +129,62 @@
 
    ["/api/books/:id" :get books/get-book
     :route-name ::get-book
-    :with [(load-book)
+    :with [load-book
            (app-mw/cache-control "public, max-age=300")
            mw/json-body-response]]
 
    ["/api/books" :post books/create-book
     :route-name ::create-book
-    :with (into moderator-write [(app-mw/require-json)])]
+    :with (into moderator-write [app-mw/require-json])]
 
    ["/api/books/:id" :put books/update-book
     :route-name ::update-book
-    :with (into moderator-write [(load-book) (app-mw/require-json)])]
+    :with (into moderator-write [load-book app-mw/require-json])]
 
    ["/api/books/:id" :patch books/patch-book
     :route-name ::patch-book
-    :with (conj auth-write (load-book))]
+    :with (conj auth-write load-book)]
 
    ["/api/books/:id" :delete books/delete-book
     :route-name ::delete-book
-    :with [(app-mw/authenticate) (app-mw/require-auth) (app-mw/require-role :admin)
-           (load-book) mw/json-body-response]]
+    :with [app-mw/authenticate app-mw/require-auth (app-mw/require-role :admin)
+           load-book mw/json-body-response]]
 
    ["/api/books/:id/stock" :get books/book-stock
     :route-name ::book-stock
-    :with [(load-book) mw/json-body-response]]
+    :with [load-book mw/json-body-response]]
 
    ["/api/books/:id/stock" :post books/update-stock
     :route-name ::update-stock
-    :with (into admin-write [(load-book)])]
+    :with (into admin-write [load-book])]
 
    ;; === Book reviews (nested under books) ===
 
    ["/api/books/:id/reviews" :get reviews/list-reviews
     :route-name ::book-reviews
-    :with [(load-book) mw/json-body-response]]
+    :with [load-book mw/json-body-response]]
 
    ["/api/books/:id/reviews" :post reviews/create-review
     :route-name ::create-review
-    :with [(load-book)
+    :with [load-book
            mw/body-params mw/keyword-params
-           (app-mw/authenticate) (app-mw/require-auth)
+           app-mw/authenticate app-mw/require-auth
            mw/json-body-response]]
 
    ;; === Reviews (direct access) ===
 
    ["/api/reviews/:id" :get reviews/get-review
     :route-name ::get-review
-    :with [(load-review) mw/json-body-response]]
+    :with [load-review mw/json-body-response]]
 
    ["/api/reviews/:id" :put reviews/update-review
     :route-name ::update-review
-    :with (into auth-write [(load-review)])]
+    :with (into auth-write [load-review])]
 
    ["/api/reviews/:id" :delete reviews/delete-review
     :route-name ::delete-review
-    :with [(app-mw/authenticate) (app-mw/require-auth)
-           (load-review) mw/json-body-response]]
+    :with [app-mw/authenticate app-mw/require-auth
+           load-review mw/json-body-response]]
 
    ;; === Authors ===
 
@@ -213,24 +197,24 @@
 
    ["/api/authors/:id" :get authors/get-author
     :route-name ::get-author
-    :with [(load-author) mw/json-body-response]]
+    :with [load-author mw/json-body-response]]
 
    ["/api/authors" :post authors/create-author
     :route-name ::create-author
-    :with (into admin-write [(app-mw/require-json)])]
+    :with (into admin-write [app-mw/require-json])]
 
    ["/api/authors/:id" :put authors/update-author
     :route-name ::update-author
-    :with (into admin-write [(load-author) (app-mw/require-json)])]
+    :with (into admin-write [load-author app-mw/require-json])]
 
    ["/api/authors/:id" :delete authors/delete-author
     :route-name ::delete-author
-    :with [(app-mw/authenticate) (app-mw/require-auth)
-           (app-mw/require-role :admin) (load-author) mw/json-body-response]]
+    :with [app-mw/authenticate app-mw/require-auth
+           (app-mw/require-role :admin) load-author mw/json-body-response]]
 
    ["/api/authors/:id/books" :get authors/author-books
     :route-name ::author-books
-    :with [(load-author) mw/json-body-response]]
+    :with [load-author mw/json-body-response]]
 
    ;; === Users ===
 
@@ -240,11 +224,11 @@
 
    ["/api/users/:id" :get users/get-user
     :route-name ::get-user
-    :with [(load-target-user) mw/json-body-response]]
+    :with [load-target-user mw/json-body-response]]
 
    ["/api/users/:id/reviews" :get reviews/user-reviews
     :route-name ::user-reviews
-    :with [(load-target-user) mw/json-body-response]]
+    :with [load-target-user mw/json-body-response]]
 
    ["/api/profile" :get users/get-profile
     :route-name ::get-profile
@@ -273,7 +257,7 @@
    ["/api/auth/whoami" :get auth/whoami
     :route-name ::whoami
     :with [mw/cookies (mw/session)
-           (app-mw/authenticate) mw/json-body-response]]
+           app-mw/authenticate mw/json-body-response]]
 
    ;; === Reading Lists ===
 
@@ -283,8 +267,8 @@
 
    ["/api/reading-lists/:id" :get rl/get-reading-list
     :route-name ::get-reading-list
-    :with [mw/cookies (mw/session) (app-mw/authenticate)
-           (load-reading-list) mw/json-body-response]]
+    :with [mw/cookies (mw/session) app-mw/authenticate
+           load-reading-list mw/json-body-response]]
 
    ["/api/reading-lists" :post rl/create-reading-list
     :route-name ::create-reading-list
@@ -292,21 +276,21 @@
 
    ["/api/reading-lists/:id" :put rl/update-reading-list
     :route-name ::update-reading-list
-    :with (into auth-write [(load-reading-list)])]
+    :with (into auth-write [load-reading-list])]
 
    ["/api/reading-lists/:id" :delete rl/delete-reading-list
     :route-name ::delete-reading-list
-    :with [(app-mw/authenticate) (app-mw/require-auth)
-           (load-reading-list) mw/json-body-response]]
+    :with [app-mw/authenticate app-mw/require-auth
+           load-reading-list mw/json-body-response]]
 
    ["/api/reading-lists/:id/books" :post rl/add-book-to-list
     :route-name ::add-book-to-list
-    :with (into auth-write [(load-reading-list)])]
+    :with (into auth-write [load-reading-list])]
 
    ["/api/reading-lists/:id/books/:book_id" :delete rl/remove-book-from-list
     :route-name ::remove-book-from-list
-    :with [(app-mw/authenticate) (app-mw/require-auth)
-           (load-reading-list) mw/json-body-response]]
+    :with [app-mw/authenticate app-mw/require-auth
+           load-reading-list mw/json-body-response]]
 
    ;; === Admin ===
 
@@ -332,7 +316,7 @@
 
    ["/api/admin/request-log" :delete admin/clear-request-log
     :route-name ::clear-request-log
-    :with [(app-mw/authenticate) (app-mw/require-auth)
+    :with [app-mw/authenticate app-mw/require-auth
            (app-mw/require-role :admin) mw/json-body-response]]
 
    ;; === Real-time (SSE + WebSocket) ===

@@ -32,10 +32,10 @@
   {::http/routes routes/routes
 
    ::http/with [;; Request tracing (adds X-Request-Id header)
-                (app-mw/request-id)
+                app-mw/request-id
 
                 ;; Request logging with timing
-                (app-mw/request-logger)
+                app-mw/request-logger
 
                 ;; Rate limiting (100 req/min per IP)
                 (app-mw/rate-limit {:max-requests 100 :window-ms 60000})

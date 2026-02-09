@@ -8,16 +8,15 @@
 
 ;; --- Authentication middleware ---
 
-(defn authenticate
-  "Middleware that checks for a valid session or API key.
+(def authenticate
+  (-> t/transformer
+      (assoc :doc "Middleware that checks for a valid session or API key.
    Sets :current-user on the env. Passes through if no auth present
    (use `require-auth` to enforce).
 
    Supports:
    - Session-based auth (cookie: hearth-session with :user-id in session)
-   - API key auth (Authorization: Bearer bk-live-xxx)"
-  []
-  (-> t/transformer
+   - API key auth (Authorization: Bearer bk-live-xxx)")
       (update :id conj ::authenticate)
       (update :tf conj
               ::authenticate
@@ -38,11 +37,10 @@
                                 :auth-method (if user-id :session :api-key)
                                 :api-key-scope (:scope api-key-data))))))))
 
-(defn require-auth
-  "Middleware that rejects unauthenticated requests with 401.
-   Must come after `authenticate` in the middleware chain."
-  []
+(def require-auth
   (-> t/transformer
+      (assoc :doc "Middleware that rejects unauthenticated requests with 401.
+   Must come after `authenticate` in the middleware chain.")
       (update :id conj ::require-auth)
       (update :tf conj
               ::require-auth
@@ -60,6 +58,7 @@
   [& roles]
   (let [allowed (set roles)]
     (-> t/transformer
+        (assoc :doc (str "Requires role: " (mapv name roles)))
         (update :id conj ::require-role)
         (update :tf conj
                 ::require-role
@@ -86,6 +85,7 @@
   [& [{:keys [max-requests window-ms]
        :or {max-requests 100 window-ms 60000}}]]
   (-> t/transformer
+      (assoc :doc (str "Rate limit: " max-requests " req/" (quot window-ms 1000) "s per IP"))
       (update :id conj ::rate-limit)
       (update :tf conj
               ::rate-limit
@@ -108,11 +108,10 @@
 
 (defonce request-log (atom []))
 
-(defn request-logger
-  "Middleware that logs every request with timing info.
-   Logs are stored in an atom for monitoring/analytics."
-  []
+(def request-logger
   (-> t/transformer
+      (assoc :doc "Middleware that logs every request with timing info.
+   Logs are stored in an atom for monitoring/analytics.")
       (update :id conj ::request-logger)
       (update :tf conj
               ::request-logger-start
@@ -135,10 +134,9 @@
 
 ;; --- Content-Type validation middleware ---
 
-(defn require-json
-  "Middleware that rejects non-JSON request bodies with 415 Unsupported Media Type."
-  []
+(def require-json
   (-> t/transformer
+      (assoc :doc "Middleware that rejects non-JSON request bodies with 415 Unsupported Media Type.")
       (update :id conj ::require-json)
       (update :tf conj
               ::require-json
@@ -162,6 +160,7 @@
   [& [{:keys [default-per-page max-per-page]
        :or {default-per-page 10 max-per-page 100}}]]
   (-> t/transformer
+      (assoc :doc (str "Pagination: default " default-per-page " per page, max " max-per-page))
       (update :id conj ::pagination-params)
       (update :tf conj
               ::pagination-params
@@ -177,10 +176,9 @@
 
 ;; --- Request ID middleware ---
 
-(defn request-id
-  "Middleware that assigns a unique ID to each request for tracing."
-  []
+(def request-id
   (-> t/transformer
+      (assoc :doc "Middleware that assigns a unique ID to each request for tracing.")
       (update :id conj ::request-id)
       (update :tf conj
               ::request-id
@@ -203,6 +201,7 @@
   "Middleware that sets Cache-Control header on responses."
   [directive]
   (-> t/transformer
+      (assoc :doc (str "Cache-Control: " directive))
       (update :id conj ::cache-control)
       (update :tf-end conj
               ::cache-control
@@ -220,6 +219,7 @@
    Assocs the entity onto env under the given key. Returns 404 if not found."
   [store entity-key entity-name]
   (-> t/transformer
+      (assoc :doc (str "Load " entity-name " by :id path param"))
       (update :id conj ::load-entity)
       (update :tf conj
               ::load-entity
@@ -241,10 +241,10 @@
 ;; --- CORS preflight middleware ---
 
 (defn cors-preflight
-  "Middleware that handles CORS preflight (OPTIONS) requests immediately.
-   Useful for API routes that need to respond to browser preflight requests."
+  "Middleware that handles CORS preflight (OPTIONS) requests immediately."
   [opts]
   (-> t/transformer
+      (assoc :doc "Handles CORS preflight (OPTIONS) requests immediately.")
       (update :id conj ::cors-preflight)
       (update :tf conj
               ::cors-preflight
