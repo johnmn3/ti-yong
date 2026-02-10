@@ -1,13 +1,32 @@
 (ns bookshelf.handlers.reading-lists
   "Reading list handlers — curated book lists per user.
-   All handlers are transformers, composable with middleware after definition."
+   All handlers extend the reading-lists-ns base transformer."
   (:require
    [bookshelf.db :as db]
+   [bookshelf.middleware :as app-mw]
+   [hearth.alpha.middleware :as mw]
    [ti-yong.alpha.transformer :as t]))
 
-(def list-public-lists
+;; --- Entity loader ---
+
+(def ^:private load-reading-list
+  (app-mw/load-entity db/reading-lists :reading-list "Reading list"))
+
+;; --- Namespace transformer ---
+
+(def reading-lists-ns
+  "Base transformer for all reading list handlers. JSON response serialization."
   (-> t/transformer
+      (update :id conj ::reading-lists)
+      (update :with into [mw/json-body-response])))
+
+;; --- Read handlers ---
+
+(def list-public-lists
+  (-> reading-lists-ns
       (update :id conj ::list-public-lists)
+      (update :with into [mw/query-params mw/keyword-params
+                          (app-mw/pagination-params)])
       (update :tf conj
               ::list-public-lists
               (fn [env]
@@ -24,8 +43,11 @@
                   (update env :res assoc :body result))))))
 
 (def get-reading-list
-  (-> t/transformer
+  (-> reading-lists-ns
       (update :id conj ::get-reading-list)
+      (update :with into [mw/cookies (mw/session)
+                          app-mw/authenticate
+                          load-reading-list])
       (update :tf conj
               ::get-reading-list
               (fn [env]
@@ -47,9 +69,13 @@
                               :body (assoc rl :username (:username user)
                                               :books books)))))))))
 
+;; --- Write handlers (require auth) ---
+
 (def create-reading-list
-  (-> t/transformer
+  (-> reading-lists-ns
       (update :id conj ::create-reading-list)
+      (update :with into [mw/body-params mw/keyword-params
+                          app-mw/authenticate app-mw/require-auth])
       (update :tf conj
               ::create-reading-list
               (fn [env]
@@ -69,8 +95,11 @@
                           :body rl))))))
 
 (def update-reading-list
-  (-> t/transformer
+  (-> reading-lists-ns
       (update :id conj ::update-reading-list)
+      (update :with into [mw/body-params mw/keyword-params
+                          app-mw/authenticate app-mw/require-auth
+                          load-reading-list])
       (update :tf conj
               ::update-reading-list
               (fn [env]
@@ -86,8 +115,10 @@
                       (update env :res assoc :body updated))))))))
 
 (def delete-reading-list
-  (-> t/transformer
+  (-> reading-lists-ns
       (update :id conj ::delete-reading-list)
+      (update :with into [app-mw/authenticate app-mw/require-auth
+                          load-reading-list])
       (update :tf conj
               ::delete-reading-list
               (fn [env]
@@ -103,8 +134,11 @@
                                 :body {:message "Reading list deleted" :id (:id rl)}))))))))
 
 (def add-book-to-list
-  (-> t/transformer
+  (-> reading-lists-ns
       (update :id conj ::add-book-to-list)
+      (update :with into [mw/body-params mw/keyword-params
+                          app-mw/authenticate app-mw/require-auth
+                          load-reading-list])
       (update :tf conj
               ::add-book-to-list
               (fn [env]
@@ -134,8 +168,10 @@
                       (update env :res assoc :body updated))))))))
 
 (def remove-book-from-list
-  (-> t/transformer
+  (-> reading-lists-ns
       (update :id conj ::remove-book-from-list)
+      (update :with into [app-mw/authenticate app-mw/require-auth
+                          load-reading-list])
       (update :tf conj
               ::remove-book-from-list
               (fn [env]

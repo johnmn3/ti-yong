@@ -1,13 +1,28 @@
 (ns bookshelf.handlers.auth
-  "Authentication handlers — login, logout, register.
-   All handlers are transformers, composable with middleware after definition."
+  "Authentication handlers — login, logout, register, whoami.
+   All handlers extend the auth-ns base transformer.
+   Auth handlers manage cookies and sessions."
   (:require
    [bookshelf.db :as db]
+   [bookshelf.middleware :as app-mw]
+   [hearth.alpha.middleware :as mw]
    [ti-yong.alpha.transformer :as t]))
 
-(def login
+;; --- Namespace transformer ---
+
+(def auth-ns
+  "Base transformer for auth handlers. JSON response + cookie/session support."
   (-> t/transformer
+      (update :id conj ::auth)
+      (update :with into [mw/json-body-response])))
+
+;; --- Handlers ---
+
+(def login
+  (-> auth-ns
       (update :id conj ::login)
+      (update :with into [mw/body-params mw/keyword-params
+                          mw/cookies (mw/session)])
       (update :tf conj
               ::login
               (fn [env]
@@ -26,8 +41,9 @@
                             :body {:error "Invalid username or password"})))))))
 
 (def logout
-  (-> t/transformer
+  (-> auth-ns
       (update :id conj ::logout)
+      (update :with into [mw/cookies (mw/session)])
       (update :tf conj
               ::logout
               (fn [env]
@@ -36,8 +52,10 @@
                         :session {})))))
 
 (def register
-  (-> t/transformer
+  (-> auth-ns
       (update :id conj ::register)
+      (update :with into [mw/body-params mw/keyword-params
+                          mw/cookies (mw/session)])
       (update :tf conj
               ::register
               (fn [env]
@@ -76,8 +94,10 @@
                               :session {:user-id id}))))))))
 
 (def whoami
-  (-> t/transformer
+  (-> auth-ns
       (update :id conj ::whoami)
+      (update :with into [mw/cookies (mw/session)
+                          app-mw/authenticate])
       (update :tf conj
               ::whoami
               (fn [env]

@@ -1,13 +1,34 @@
 (ns bookshelf.handlers.users
   "User resource handlers — profiles, reading lists, and user management.
-   All handlers are transformers, composable with middleware after definition."
+   All handlers extend the users-ns base transformer."
   (:require
    [bookshelf.db :as db]
+   [bookshelf.middleware :as app-mw]
+   [hearth.alpha.middleware :as mw]
    [ti-yong.alpha.transformer :as t]))
 
-(def list-users
+;; --- Entity loader ---
+
+(def ^:private load-target-user
+  (app-mw/load-entity db/users :target-user "User"))
+
+;; --- Namespace transformer ---
+
+(def users-ns
+  "Base transformer for all user handlers. JSON response serialization."
   (-> t/transformer
+      (update :id conj ::users)
+      (update :with into [mw/json-body-response])))
+
+;; --- Read handlers ---
+
+(def list-users
+  (-> users-ns
       (update :id conj ::list-users)
+      (update :with into [mw/query-params mw/keyword-params
+                          app-mw/authenticate app-mw/require-auth
+                          (app-mw/require-role :admin)
+                          (app-mw/pagination-params)])
       (update :tf conj
               ::list-users
               (fn [env]
@@ -19,8 +40,9 @@
                   (update env :res assoc :body result))))))
 
 (def get-user
-  (-> t/transformer
+  (-> users-ns
       (update :id conj ::get-user)
+      (update :with conj load-target-user)
       (update :tf conj
               ::get-user
               (fn [env]
@@ -36,8 +58,10 @@
                                  :reading-lists (count reading-lists)}))))))
 
 (def get-profile
-  (-> t/transformer
+  (-> users-ns
       (update :id conj ::get-profile)
+      (update :with into [mw/query-params mw/keyword-params
+                          app-mw/authenticate app-mw/require-auth])
       (update :tf conj
               ::get-profile
               (fn [env]
@@ -53,9 +77,13 @@
                                  :review-count (count reviews)
                                  :reading-lists (mapv #(select-keys % [:id :name :public? :book-ids]) lists)}))))))
 
+;; --- Write handlers ---
+
 (def update-profile
-  (-> t/transformer
+  (-> users-ns
       (update :id conj ::update-profile)
+      (update :with into [mw/body-params mw/keyword-params
+                          app-mw/authenticate app-mw/require-auth])
       (update :tf conj
               ::update-profile
               (fn [env]

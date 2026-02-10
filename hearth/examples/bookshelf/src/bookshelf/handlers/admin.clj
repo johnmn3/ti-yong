@@ -1,14 +1,31 @@
 (ns bookshelf.handlers.admin
   "Admin handlers — stats, exports, bulk operations.
-   All handlers are transformers, composable with middleware after definition."
+   All handlers extend the admin-ns base transformer, which requires
+   admin authentication for ALL admin handlers."
   (:require
    [bookshelf.db :as db]
    [bookshelf.middleware :as app-mw]
+   [hearth.alpha.middleware :as mw]
    [ti-yong.alpha.transformer :as t]))
 
-(def dashboard
+;; --- Namespace transformer ---
+
+(def admin-ns
+  "Base transformer for all admin handlers.
+   Requires admin auth and JSON response for every admin endpoint."
   (-> t/transformer
+      (update :id conj ::admin)
+      (update :with into [app-mw/authenticate app-mw/require-auth
+                          (app-mw/require-role :admin)
+                          mw/json-body-response])))
+
+;; --- Read handlers ---
+
+(def dashboard
+  (-> admin-ns
       (update :id conj ::dashboard)
+      (update :with into [mw/query-params mw/keyword-params
+                          (app-mw/pagination-params)])
       (update :tf conj
               ::dashboard
               (fn [env]
@@ -32,8 +49,10 @@
                                  :request-log-size (count @app-mw/request-log)}))))))
 
 (def export-catalog
-  (-> t/transformer
+  (-> admin-ns
       (update :id conj ::export-catalog)
+      (update :with into [mw/query-params mw/keyword-params
+                          (app-mw/pagination-params)])
       (update :tf conj
               ::export-catalog
               (fn [env]
@@ -56,8 +75,10 @@
                                  :books catalog}))))))
 
 (def export-users
-  (-> t/transformer
+  (-> admin-ns
       (update :id conj ::export-users)
+      (update :with into [mw/query-params mw/keyword-params
+                          (app-mw/pagination-params)])
       (update :tf conj
               ::export-users
               (fn [env]
@@ -71,9 +92,12 @@
                                  :count (count users-list)
                                  :users users-list}))))))
 
+;; --- Write handlers ---
+
 (def bulk-update-prices
-  (-> t/transformer
+  (-> admin-ns
       (update :id conj ::bulk-update-prices)
+      (update :with into [mw/body-params mw/keyword-params])
       (update :tf conj
               ::bulk-update-prices
               (fn [env]
@@ -91,8 +115,10 @@
                                  :results results}))))))
 
 (def request-log
-  (-> t/transformer
+  (-> admin-ns
       (update :id conj ::request-log)
+      (update :with into [mw/query-params mw/keyword-params
+                          (app-mw/pagination-params)])
       (update :tf conj
               ::request-log
               (fn [env]
@@ -102,7 +128,7 @@
                   (update env :res assoc :body result))))))
 
 (def clear-request-log
-  (-> t/transformer
+  (-> admin-ns
       (update :id conj ::clear-request-log)
       (update :tf conj
               ::clear-request-log

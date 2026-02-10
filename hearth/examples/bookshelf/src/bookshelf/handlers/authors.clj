@@ -1,13 +1,33 @@
 (ns bookshelf.handlers.authors
   "Author resource handlers — CRUD and bibliography.
-   All handlers are transformers, composable with middleware after definition."
+   All handlers extend the authors-ns base transformer."
   (:require
    [bookshelf.db :as db]
+   [bookshelf.middleware :as app-mw]
+   [hearth.alpha.middleware :as mw]
    [ti-yong.alpha.transformer :as t]))
 
-(def list-authors
+;; --- Entity loader ---
+
+(def ^:private load-author
+  (app-mw/load-entity db/authors :author "Author"))
+
+;; --- Namespace transformer ---
+
+(def authors-ns
+  "Base transformer for all author handlers. JSON response serialization."
   (-> t/transformer
+      (update :id conj ::authors)
+      (update :with into [mw/json-body-response])))
+
+;; --- Read handlers ---
+
+(def list-authors
+  (-> authors-ns
       (update :id conj ::list-authors)
+      (update :with into [mw/query-params mw/keyword-params
+                          (app-mw/pagination-params)
+                          (app-mw/cache-control "public, max-age=300")])
       (update :tf conj
               ::list-authors
               (fn [env]
@@ -21,8 +41,9 @@
                   (update env :res assoc :body result))))))
 
 (def get-author
-  (-> t/transformer
+  (-> authors-ns
       (update :id conj ::get-author)
+      (update :with conj load-author)
       (update :tf conj
               ::get-author
               (fn [env]
@@ -32,9 +53,30 @@
                   (update env :res assoc
                           :body (assoc author :books book-summaries)))))))
 
+(def author-books
+  (-> authors-ns
+      (update :id conj ::author-books)
+      (update :with conj load-author)
+      (update :tf conj
+              ::author-books
+              (fn [env]
+                (let [author (:author env)
+                      books (db/find-books-by-author (:id author))
+                      sorted (sort-by :published books)]
+                  (update env :res assoc
+                          :body {:author (select-keys author [:id :name])
+                                 :books (vec sorted)
+                                 :count (count books)}))))))
+
+;; --- Write handlers (require auth) ---
+
 (def create-author
-  (-> t/transformer
+  (-> authors-ns
       (update :id conj ::create-author)
+      (update :with into [mw/body-params mw/keyword-params
+                          app-mw/authenticate app-mw/require-auth
+                          (app-mw/require-role :admin)
+                          app-mw/require-json])
       (update :tf conj
               ::create-author
               (fn [env]
@@ -48,8 +90,12 @@
                           :body author))))))
 
 (def update-author
-  (-> t/transformer
+  (-> authors-ns
       (update :id conj ::update-author)
+      (update :with into [mw/body-params mw/keyword-params
+                          app-mw/authenticate app-mw/require-auth
+                          (app-mw/require-role :admin)
+                          load-author app-mw/require-json])
       (update :tf conj
               ::update-author
               (fn [env]
@@ -60,8 +106,11 @@
                   (update env :res assoc :body updated))))))
 
 (def delete-author
-  (-> t/transformer
+  (-> authors-ns
       (update :id conj ::delete-author)
+      (update :with into [app-mw/authenticate app-mw/require-auth
+                          (app-mw/require-role :admin)
+                          load-author])
       (update :tf conj
               ::delete-author
               (fn [env]
@@ -72,17 +121,3 @@
                     (swap! db/books dissoc (:id b)))
                   (update env :res assoc
                           :body {:message (str "Deleted " (:name author) " and " (count books) " books")}))))))
-
-(def author-books
-  (-> t/transformer
-      (update :id conj ::author-books)
-      (update :tf conj
-              ::author-books
-              (fn [env]
-                (let [author (:author env)
-                      books (db/find-books-by-author (:id author))
-                      sorted (sort-by :published books)]
-                  (update env :res assoc
-                          :body {:author (select-keys author [:id :name])
-                                 :books (vec sorted)
-                                 :count (count books)}))))))

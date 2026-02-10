@@ -1,9 +1,10 @@
 (ns bookshelf.handlers.pages
   "HTML page handlers — landing page, API docs, and health check.
-   Demonstrates: HTML responses, content types, static content serving.
-   All handlers are transformers, composable with middleware after definition."
+   Pages is the only namespace without a shared ns-level transformer
+   since home-page returns HTML while health/api-info return JSON."
   (:require
    [bookshelf.db :as db]
+   [hearth.alpha.middleware :as mw]
    [ti-yong.alpha.transformer :as t]))
 
 (def home-page
@@ -103,6 +104,7 @@
 (def health
   (-> t/transformer
       (update :id conj ::health)
+      (update :with conj mw/json-body-response)
       (update :tf conj
               ::health
               (fn [env]
@@ -115,6 +117,7 @@
 (def api-info
   (-> t/transformer
       (update :id conj ::api-info)
+      (update :with conj mw/json-body-response)
       (update :tf conj
               ::api-info
               (fn [env]

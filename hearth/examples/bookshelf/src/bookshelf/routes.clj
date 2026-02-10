@@ -1,10 +1,12 @@
 (ns bookshelf.routes
   "Route definitions for the BookShelf API.
-   Demonstrates extensive use of per-route middleware (transformers)
-   with different middleware stacks for different route groups."
+
+   Middleware is now declared on each handler transformer via :with in the handler
+   namespaces. Routes are clean data: just [path method handler :route-name name].
+
+   The :with key is still available on routes for rare cases where you need
+   route-specific middleware that doesn't belong on the handler itself."
   (:require
-   [bookshelf.db :as db]
-   [bookshelf.middleware :as app-mw]
    [bookshelf.handlers.auth :as auth]
    [bookshelf.handlers.books :as books]
    [bookshelf.handlers.authors :as authors]
@@ -14,310 +16,166 @@
    [bookshelf.handlers.admin :as admin]
    [bookshelf.handlers.pages :as pages]
    [bookshelf.handlers.realtime :as realtime]
-   [hearth.alpha.middleware :as mw]
    [hearth.alpha.websocket :as ws]))
 
-;; --- Middleware stacks for different route groups ---
-;; This demonstrates composing different transformer pipelines per route.
-
-(def ^:private json-api
-  [mw/body-params
-   mw/keyword-params
-   mw/json-body-response])
-
-(def ^:private json-read
-  [mw/query-params
-   mw/keyword-params
-   mw/json-body-response])
-
-(def ^:private paginated-read
-  [mw/query-params
-   mw/keyword-params
-   (app-mw/pagination-params)
-   mw/json-body-response])
-
-(def ^:private auth-read
-  [mw/query-params
-   mw/keyword-params
-   app-mw/authenticate
-   app-mw/require-auth
-   mw/json-body-response])
-
-(def ^:private auth-write
-  [mw/body-params
-   mw/keyword-params
-   app-mw/authenticate
-   app-mw/require-auth
-   mw/json-body-response])
-
-(def ^:private admin-write
-  [mw/body-params
-   mw/keyword-params
-   app-mw/authenticate
-   app-mw/require-auth
-   (app-mw/require-role :admin)
-   mw/json-body-response])
-
-(def ^:private admin-read
-  [mw/query-params
-   mw/keyword-params
-   app-mw/authenticate
-   app-mw/require-auth
-   (app-mw/require-role :admin)
-   (app-mw/pagination-params)
-   mw/json-body-response])
-
-(def ^:private moderator-write
-  [mw/body-params
-   mw/keyword-params
-   app-mw/authenticate
-   app-mw/require-auth
-   (app-mw/require-role :admin :moderator)
-   mw/json-body-response])
-
-;; --- Entity loaders (parameterized, so still defn→def-with-call) ---
-
-(def ^:private load-book
-  (app-mw/load-entity db/books :book "Book"))
-
-(def ^:private load-author
-  (app-mw/load-entity db/authors :author "Author"))
-
-(def ^:private load-review
-  (app-mw/load-entity db/reviews :review "Review"))
-
-(def ^:private load-target-user
-  (app-mw/load-entity db/users :target-user "User"))
-
-(def ^:private load-reading-list
-  (app-mw/load-entity db/reading-lists :reading-list "Reading list"))
-
 (def routes
-  "All BookShelf routes. Each route demonstrates specific middleware composition.
+  "All BookShelf routes.
 
-   Route format: [path method handler & {:keys [route-name with]}]
-
-   The :with key specifies per-route transformer middleware that gets composed
-   with the global middleware stack. This is the hearth equivalent of Pedestal's
-   per-route interceptor chains."
-  [;; === Pages (HTML) ===
+   Each handler is a transformer that carries its own middleware via :with.
+   Namespace-level transformers (e.g. books/books-ns) provide shared middleware
+   for all handlers in a namespace. Individual handlers extend the ns transformer
+   and add per-handler middleware (auth, loaders, pagination, etc.)."
+  [;; === Pages (HTML + JSON) ===
    ["/" :get pages/home-page
     :route-name ::home]
 
    ["/health" :get pages/health
-    :route-name ::health
-    :with [mw/json-body-response]]
+    :route-name ::health]
 
    ["/api" :get pages/api-info
-    :route-name ::api-info
-    :with [mw/json-body-response]]
+    :route-name ::api-info]
 
-   ;; === Books (full CRUD with varied middleware per route) ===
+   ;; === Books (full CRUD) ===
 
    ["/api/books" :get books/list-books
-    :route-name ::list-books
-    :with [mw/query-params mw/keyword-params
-           (app-mw/pagination-params)
-           (app-mw/cache-control "public, max-age=60")
-           mw/json-body-response]]
+    :route-name ::list-books]
 
    ["/api/books/search" :get books/search-books
-    :route-name ::search-books
-    :with [mw/query-params mw/keyword-params
-           (app-mw/pagination-params)
-           mw/json-body-response]]
+    :route-name ::search-books]
 
    ["/api/books/:id" :get books/get-book
-    :route-name ::get-book
-    :with [load-book
-           (app-mw/cache-control "public, max-age=300")
-           mw/json-body-response]]
+    :route-name ::get-book]
 
    ["/api/books" :post books/create-book
-    :route-name ::create-book
-    :with (into moderator-write [app-mw/require-json])]
+    :route-name ::create-book]
 
    ["/api/books/:id" :put books/update-book
-    :route-name ::update-book
-    :with (into moderator-write [load-book app-mw/require-json])]
+    :route-name ::update-book]
 
    ["/api/books/:id" :patch books/patch-book
-    :route-name ::patch-book
-    :with (conj auth-write load-book)]
+    :route-name ::patch-book]
 
    ["/api/books/:id" :delete books/delete-book
-    :route-name ::delete-book
-    :with [app-mw/authenticate app-mw/require-auth (app-mw/require-role :admin)
-           load-book mw/json-body-response]]
+    :route-name ::delete-book]
 
    ["/api/books/:id/stock" :get books/book-stock
-    :route-name ::book-stock
-    :with [load-book mw/json-body-response]]
+    :route-name ::book-stock]
 
    ["/api/books/:id/stock" :post books/update-stock
-    :route-name ::update-stock
-    :with (into admin-write [load-book])]
+    :route-name ::update-stock]
 
    ;; === Book reviews (nested under books) ===
 
    ["/api/books/:id/reviews" :get reviews/list-reviews
-    :route-name ::book-reviews
-    :with [load-book mw/json-body-response]]
+    :route-name ::book-reviews]
 
    ["/api/books/:id/reviews" :post reviews/create-review
-    :route-name ::create-review
-    :with [load-book
-           mw/body-params mw/keyword-params
-           app-mw/authenticate app-mw/require-auth
-           mw/json-body-response]]
+    :route-name ::create-review]
 
    ;; === Reviews (direct access) ===
 
    ["/api/reviews/:id" :get reviews/get-review
-    :route-name ::get-review
-    :with [load-review mw/json-body-response]]
+    :route-name ::get-review]
 
    ["/api/reviews/:id" :put reviews/update-review
-    :route-name ::update-review
-    :with (into auth-write [load-review])]
+    :route-name ::update-review]
 
    ["/api/reviews/:id" :delete reviews/delete-review
-    :route-name ::delete-review
-    :with [app-mw/authenticate app-mw/require-auth
-           load-review mw/json-body-response]]
+    :route-name ::delete-review]
 
    ;; === Authors ===
 
    ["/api/authors" :get authors/list-authors
-    :route-name ::list-authors
-    :with [mw/query-params mw/keyword-params
-           (app-mw/pagination-params)
-           (app-mw/cache-control "public, max-age=300")
-           mw/json-body-response]]
+    :route-name ::list-authors]
 
    ["/api/authors/:id" :get authors/get-author
-    :route-name ::get-author
-    :with [load-author mw/json-body-response]]
+    :route-name ::get-author]
 
    ["/api/authors" :post authors/create-author
-    :route-name ::create-author
-    :with (into admin-write [app-mw/require-json])]
+    :route-name ::create-author]
 
    ["/api/authors/:id" :put authors/update-author
-    :route-name ::update-author
-    :with (into admin-write [load-author app-mw/require-json])]
+    :route-name ::update-author]
 
    ["/api/authors/:id" :delete authors/delete-author
-    :route-name ::delete-author
-    :with [app-mw/authenticate app-mw/require-auth
-           (app-mw/require-role :admin) load-author mw/json-body-response]]
+    :route-name ::delete-author]
 
    ["/api/authors/:id/books" :get authors/author-books
-    :route-name ::author-books
-    :with [load-author mw/json-body-response]]
+    :route-name ::author-books]
 
    ;; === Users ===
 
    ["/api/users" :get users/list-users
-    :route-name ::list-users
-    :with admin-read]
+    :route-name ::list-users]
 
    ["/api/users/:id" :get users/get-user
-    :route-name ::get-user
-    :with [load-target-user mw/json-body-response]]
+    :route-name ::get-user]
 
    ["/api/users/:id/reviews" :get reviews/user-reviews
-    :route-name ::user-reviews
-    :with [load-target-user mw/json-body-response]]
+    :route-name ::user-reviews]
 
    ["/api/profile" :get users/get-profile
-    :route-name ::get-profile
-    :with auth-read]
+    :route-name ::get-profile]
 
    ["/api/profile" :put users/update-profile
-    :route-name ::update-profile
-    :with auth-write]
+    :route-name ::update-profile]
 
    ;; === Auth ===
 
    ["/api/auth/login" :post auth/login
-    :route-name ::login
-    :with [mw/body-params mw/keyword-params
-           mw/cookies (mw/session) mw/json-body-response]]
+    :route-name ::login]
 
    ["/api/auth/logout" :post auth/logout
-    :route-name ::logout
-    :with [mw/cookies (mw/session) mw/json-body-response]]
+    :route-name ::logout]
 
    ["/api/auth/register" :post auth/register
-    :route-name ::register
-    :with [mw/body-params mw/keyword-params
-           mw/cookies (mw/session) mw/json-body-response]]
+    :route-name ::register]
 
    ["/api/auth/whoami" :get auth/whoami
-    :route-name ::whoami
-    :with [mw/cookies (mw/session)
-           app-mw/authenticate mw/json-body-response]]
+    :route-name ::whoami]
 
    ;; === Reading Lists ===
 
    ["/api/reading-lists" :get rl/list-public-lists
-    :route-name ::list-reading-lists
-    :with paginated-read]
+    :route-name ::list-reading-lists]
 
    ["/api/reading-lists/:id" :get rl/get-reading-list
-    :route-name ::get-reading-list
-    :with [mw/cookies (mw/session) app-mw/authenticate
-           load-reading-list mw/json-body-response]]
+    :route-name ::get-reading-list]
 
    ["/api/reading-lists" :post rl/create-reading-list
-    :route-name ::create-reading-list
-    :with auth-write]
+    :route-name ::create-reading-list]
 
    ["/api/reading-lists/:id" :put rl/update-reading-list
-    :route-name ::update-reading-list
-    :with (into auth-write [load-reading-list])]
+    :route-name ::update-reading-list]
 
    ["/api/reading-lists/:id" :delete rl/delete-reading-list
-    :route-name ::delete-reading-list
-    :with [app-mw/authenticate app-mw/require-auth
-           load-reading-list mw/json-body-response]]
+    :route-name ::delete-reading-list]
 
    ["/api/reading-lists/:id/books" :post rl/add-book-to-list
-    :route-name ::add-book-to-list
-    :with (into auth-write [load-reading-list])]
+    :route-name ::add-book-to-list]
 
    ["/api/reading-lists/:id/books/:book_id" :delete rl/remove-book-from-list
-    :route-name ::remove-book-from-list
-    :with [app-mw/authenticate app-mw/require-auth
-           load-reading-list mw/json-body-response]]
+    :route-name ::remove-book-from-list]
 
    ;; === Admin ===
 
    ["/api/admin/dashboard" :get admin/dashboard
-    :route-name ::admin-dashboard
-    :with admin-read]
+    :route-name ::admin-dashboard]
 
    ["/api/admin/export/catalog" :get admin/export-catalog
-    :route-name ::export-catalog
-    :with admin-read]
+    :route-name ::export-catalog]
 
    ["/api/admin/export/users" :get admin/export-users
-    :route-name ::export-users
-    :with admin-read]
+    :route-name ::export-users]
 
    ["/api/admin/bulk/prices" :post admin/bulk-update-prices
-    :route-name ::bulk-prices
-    :with admin-write]
+    :route-name ::bulk-prices]
 
    ["/api/admin/request-log" :get admin/request-log
-    :route-name ::request-log
-    :with admin-read]
+    :route-name ::request-log]
 
    ["/api/admin/request-log" :delete admin/clear-request-log
-    :route-name ::clear-request-log
-    :with [app-mw/authenticate app-mw/require-auth
-           (app-mw/require-role :admin) mw/json-body-response]]
+    :route-name ::clear-request-log]
 
    ;; === Real-time (SSE + WebSocket) ===
 
@@ -327,7 +185,7 @@
    ["/api/activity/stream" :get (realtime/activity-feed)
     :route-name ::activity-stream]
 
-   ["/ws/chat" :get (fn [env] env)  ;; placeholder, upgraded by ws-upgrade
+   ["/ws/chat" :get (fn [env] env)
     :route-name ::ws-chat
     :with [(ws/ws-upgrade (realtime/chat-handler))]]
 

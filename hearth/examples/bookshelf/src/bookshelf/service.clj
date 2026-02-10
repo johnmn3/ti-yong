@@ -6,8 +6,7 @@
    [bookshelf.middleware :as app-mw]
    [bookshelf.routes :as routes]
    [hearth.alpha :as http]
-   [hearth.alpha.middleware :as mw]
-   [hearth.alpha.error :as err]))
+   [hearth.alpha.middleware :as mw]))
 
 ;; Seed the database on load
 (db/seed!)
@@ -22,13 +21,13 @@
    - ::http/join?      — block calling thread?
 
    Global middleware (::http/with) runs before default middleware.
-   Per-route middleware (:with on each route) runs inside the route handler.
+   Per-handler middleware (:with on each handler transformer) runs inside the handler.
 
    Middleware pipeline for a request to e.g. GET /api/books/:id:
-     1. Global: request-id, request-logger, rate-limit, cors, cookies, session, authenticate
+     1. Global: request-id, request-logger, rate-limit, cors
      2. Default: error-handler, secure-headers, not-found, head-method, not-modified, query-params, method-param
-     3. Per-route: load-book, cache-control, json-body-response
-     4. Handler: books/get-book"
+     3. Per-handler: json-body-response, load-book, cache-control (defined on books/get-book)
+     4. Handler :tf: books/get-book business logic"
   {::http/routes routes/routes
 
    ::http/with [;; Request tracing (adds X-Request-Id header)
@@ -48,10 +47,7 @@
                 ;; CORS preflight handler
                 (app-mw/cors-preflight {:allowed-origins "*"
                                         :allowed-methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-                                        :allowed-headers "Content-Type, Authorization, Accept"})
-
-                ;; JSON body response as default serializer
-                mw/json-body-response]
+                                        :allowed-headers "Content-Type, Authorization, Accept"})]
 
    ::http/port 8080
    ::http/join? false})
