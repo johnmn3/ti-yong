@@ -118,5 +118,5 @@
               (fn [env]
                 (if (ws/upgrade-request? env)
                   (let [resp (handler-fn env)]
-                    (assoc env :env-op (constantly resp)))
+                    (assoc env :res resp))
                   env)))))

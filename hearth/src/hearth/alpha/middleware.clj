@@ -717,8 +717,8 @@
                            actual (read-token env)]
                        (if (and expected actual (= expected actual))
                          env
-                         ;; Short-circuit: replace the handler with error response
-                         (assoc env :env-op (constantly error-response)))))))))))
+                         ;; Short-circuit: set :res to skip handler
+                         (assoc env :res error-response))))))))))
 
 ;; --- Multipart Params ---
 
@@ -873,10 +873,9 @@
                        (let [^bytes body-bytes (body-to-bytes body)]
                          (if (and max-size body-bytes (> (alength body-bytes) ^long max-size))
                            ;; Short-circuit with 413
-                           (assoc env :env-op
-                                  (constantly {:status 413
-                                               :headers {}
-                                               :body "Request Entity Too Large"}))
+                           (assoc env :res {:status 413
+                                            :headers {}
+                                            :body "Request Entity Too Large"})
                            (let [parsed (parse-multipart-body body-bytes boundary)]
                              (assoc env :multipart-params parsed))))
                        env))

@@ -106,13 +106,17 @@
                     "Content-Disposition: form-data; name=\"data\"\r\n\r\n"
                     (apply str (repeat 200 "A"))
                     "\r\n------sizelimit--\r\n")
+          observed (atom nil)
           handler (-> t/transformer
                       (update :with conj (mw/multipart-params {:max-size 100}))
                       (assoc :headers {"content-type"
                                        "multipart/form-data; boundary=----sizelimit"})
-                      (assoc :body body))]
-      (let [result (handler)]
-        (is (= 413 (:status result)))))))
+                      (assoc :body body)
+                      (assoc :env-op (fn [env]
+                                       (reset! observed (:res env))
+                                       (:res env))))]
+      (handler)
+      (is (= 413 (:status @observed))))))
 
 (deftest multipart-multiple-files-test
   (testing "parses multiple file fields"

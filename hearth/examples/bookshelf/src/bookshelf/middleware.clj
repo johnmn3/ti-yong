@@ -47,10 +47,9 @@
               (fn [env]
                 (if (:current-user env)
                   env
-                  (assoc env :env-op
-                         (constantly {:status 401
-                                      :headers {}
-                                      :body {:error "Authentication required"}})))))))
+                  (assoc env :res {:status 401
+                                   :headers {}
+                                   :body {:error "Authentication required"}}))))))
 
 (defn require-role
   "Middleware that restricts access to users with specific roles.
@@ -66,12 +65,10 @@
                   (let [user-role (get-in env [:current-user :role])]
                     (if (allowed user-role)
                       env
-                      (assoc env :env-op
-                             (constantly
-                              {:status 403
-                               :headers {}
-                               :body {:error "Insufficient permissions"
-                                      :required (mapv name roles)}})))))))))
+                      (assoc env :res {:status 403
+                                       :headers {}
+                                       :body {:error "Insufficient permissions"
+                                              :required (mapv name roles)}}))))))))
 
 ;; --- Rate limiting middleware ---
 
@@ -96,11 +93,9 @@
                       current (get @rate-limit-store key 0)]
                   (swap! rate-limit-store assoc key (inc current))
                   (if (>= current max-requests)
-                    (assoc env :env-op
-                           (constantly
-                            {:status 429
-                             :headers {"Retry-After" (str (quot window-ms 1000))}
-                             :body {:error "Too many requests"}}))
+                    (assoc env :res {:status 429
+                                     :headers {"Retry-After" (str (quot window-ms 1000))}
+                                     :body {:error "Too many requests"}})
                     (assoc-in env [:response-headers "X-RateLimit-Remaining"]
                               (str (- max-requests current 1)))))))))
 
@@ -145,11 +140,9 @@
                       ct (get-in env [:headers "content-type"] "")]
                   (if (and (#{:post :put :patch} method)
                            (not (clojure.string/includes? ct "application/json")))
-                    (assoc env :env-op
-                           (constantly
-                            {:status 415
-                             :headers {}
-                             :body {:error "Content-Type must be application/json"}}))
+                    (assoc env :res {:status 415
+                                     :headers {}
+                                     :body {:error "Content-Type must be application/json"}})
                     env))))))
 
 ;; --- Pagination middleware ---
@@ -231,12 +224,10 @@
                       entity (when id (get @store id))]
                   (if entity
                     (assoc env entity-key entity)
-                    (assoc env :env-op
-                           (constantly
-                            {:status 404
-                             :headers {}
-                             :body {:error (str entity-name " not found")
-                                    :id id-str}}))))))))
+                    (assoc env :res {:status 404
+                                     :headers {}
+                                     :body {:error (str entity-name " not found")
+                                            :id id-str}})))))))
 
 ;; --- CORS preflight middleware ---
 
@@ -250,12 +241,10 @@
               ::cors-preflight
               (fn [env]
                 (if (= :options (:request-method env))
-                  (assoc env :env-op
-                         (constantly
-                          {:status 204
-                           :headers {"Access-Control-Allow-Origin" (:allowed-origins opts "*")
-                                     "Access-Control-Allow-Methods" (:allowed-methods opts "GET, POST, PUT, DELETE, OPTIONS")
-                                     "Access-Control-Allow-Headers" (:allowed-headers opts "Content-Type, Authorization, Accept")
-                                     "Access-Control-Max-Age" (str (:max-age opts 86400))}
-                           :body nil}))
+                  (assoc env :res {:status 204
+                                   :headers {"Access-Control-Allow-Origin" (:allowed-origins opts "*")
+                                             "Access-Control-Allow-Methods" (:allowed-methods opts "GET, POST, PUT, DELETE, OPTIONS")
+                                             "Access-Control-Allow-Headers" (:allowed-headers opts "Content-Type, Authorization, Accept")
+                                             "Access-Control-Max-Age" (str (:max-age opts 86400))}
+                                   :body nil})
                   env)))))
