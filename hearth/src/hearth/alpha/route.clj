@@ -1,11 +1,21 @@
 (ns hearth.alpha.route
   (:require
    [clojure.string :as str]
-   [ti-yong.alpha.transformer :as t]))
+   [ti-yong.alpha.transformer :as t]
+   [ti-yong.alpha.root :as r]
+   [hearth.alpha.pipeline :as pipeline]))
 
 ;; Route expansion and router transformer.
 ;; Routes are defined as data vectors, expanded into route maps,
 ;; and matched against incoming requests.
+;;
+;; Handlers can be either:
+;;   - plain functions: (fn [env] -> response-map)
+;;   - transformers: (-> t/transformer ... (update :tf conj ...))
+;;
+;; Transformer handlers get the request env merged in and are invoked
+;; directly. Their :tf steps update :res on the env. This allows
+;; adding middleware to handlers after definition.
 
 (defn- extract-path-params
   "Extract path parameter names from a path pattern like '/items/:id'."
@@ -83,9 +93,18 @@
          (seq param-values)
          (assoc :path-params-values param-values))))))
 
+(defn- transformer-handler?
+  "Returns true if the handler is a transformer (map with :id), not a plain fn."
+  [handler]
+  (and (map? handler) (contains? handler :id)))
+
 (defn router
   "Create a router transformer from route definitions.
-   The router uses :env-op to dispatch to the matched route's handler."
+   The router uses :env-op to dispatch to the matched route's handler.
+
+   Handlers can be plain functions (fn [env] -> response) or transformers.
+   Transformer handlers get the request env merged in and are invoked directly,
+   allowing middleware to be composed onto handlers after definition."
   [route-defs]
   (let [routes (expand-routes route-defs)]
     (-> t/transformer
@@ -97,28 +116,49 @@
                        path (:uri env)
                        match (match-route (:routes env) method path)]
                    (if match
-                     (let [route-with (:with match)
-                           ;; Build a handler transformer with route middleware
+                     (let [handler (:handler match)
+                           route-with (:with match)
                            handler-env (cond-> env
                                          (seq (:path-params-values match))
                                          (assoc :path-params-values (:path-params-values match))
                                          true
                                          (assoc :route-name (:route-name match)))
-                           ;; If the route has :with middleware, compose them
-                           handler-env (if (seq route-with)
-                                         (let [;; Build a transformer with middleware and request data
-                                               req-keys (select-keys handler-env
-                                                          [:uri :request-method :query-string
-                                                           :headers :body :scheme :server-name
-                                                           :server-port :remote-addr :path-params-values
-                                                           :route-name])
-                                               mw-tf (-> t/transformer
-                                                         (merge req-keys)
-                                                         (update :with into route-with)
-                                                         (assoc :env-op (:handler match)))]
-                                           ;; Invoke the middleware-wrapped handler
-                                           (mw-tf))
-                                         ;; Call handler directly with env
-                                         ((:handler match) handler-env))]
-                       handler-env)
+                           req-keys (select-keys handler-env
+                                                 [:uri :request-method :query-string
+                                                  :headers :body :scheme :server-name
+                                                  :server-port :remote-addr :path-params-values
+                                                  :route-name])]
+                       (cond
+                         ;; Transformer handler: merge request data in, compose :with, invoke
+                         (transformer-handler? handler)
+                         (let [handler-tf (-> handler
+                                             (merge req-keys)
+                                             ;; Propagate any env keys set by global middleware
+                                             (merge (select-keys handler-env
+                                                                 [:current-user :auth-method :api-key-scope
+                                                                  :session :query-params :body-params
+                                                                  :form-params :csrf-token :pagination
+                                                                  :request-id :multipart-params]))
+                                             (assoc ::r/tform pipeline/res-aware-tform
+                                                    :env-op pipeline/handler-env-op)
+                                             ;; Prepend default-response so :res is initialized
+                                             ;; before handler's :tf step runs
+                                             (update :with #(vec (cons pipeline/default-response %)))
+                                             (cond->
+                                               (seq route-with)
+                                               (update :with into route-with)))]
+                           (handler-tf))
+
+                         ;; Plain fn handler with :with middleware
+                         (seq route-with)
+                         (let [mw-tf (-> t/transformer
+                                         (merge req-keys)
+                                         (update :with into route-with)
+                                         (assoc :env-op (pipeline/res-aware-env-op handler)
+                                                ::r/tform pipeline/res-aware-tform))]
+                           (mw-tf))
+
+                         ;; Plain fn handler, no middleware
+                         :else
+                         (handler handler-env)))
                      {:status 404 :headers {} :body "Not Found"})))))))

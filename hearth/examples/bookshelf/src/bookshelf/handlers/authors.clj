@@ -1,75 +1,88 @@
 (ns bookshelf.handlers.authors
-  "Author resource handlers — CRUD and bibliography."
+  "Author resource handlers — CRUD and bibliography.
+   All handlers are transformers, composable with middleware after definition."
   (:require
-   [bookshelf.db :as db]))
+   [bookshelf.db :as db]
+   [ti-yong.alpha.transformer :as t]))
 
-(defn list-authors
-  "GET /api/authors — list all authors with book counts."
-  [env]
-  (let [pagination (:pagination env {:page 1 :per-page 20})
-        authors-list (->> (vals @db/authors)
-                          (map (fn [a]
-                                 (assoc a :book-count
-                                        (count (db/find-books-by-author (:id a))))))
-                          (sort-by :name))
-        result (db/paginate authors-list pagination)]
-    {:status 200
-     :headers {}
-     :body result}))
+(def list-authors
+  (-> t/transformer
+      (update :id conj ::list-authors)
+      (update :tf conj
+              ::list-authors
+              (fn [env]
+                (let [pagination (:pagination env {:page 1 :per-page 20})
+                      authors-list (->> (vals @db/authors)
+                                        (map (fn [a]
+                                               (assoc a :book-count
+                                                      (count (db/find-books-by-author (:id a))))))
+                                        (sort-by :name))
+                      result (db/paginate authors-list pagination)]
+                  (update env :res assoc :body result))))))
 
-(defn get-author
-  "GET /api/authors/:id — fetch author with full bibliography."
-  [env]
-  (let [author (:author env)
-        books (db/find-books-by-author (:id author))
-        book-summaries (mapv #(select-keys % [:id :title :published :genres :price]) books)]
-    {:status 200
-     :headers {}
-     :body (assoc author :books book-summaries)}))
+(def get-author
+  (-> t/transformer
+      (update :id conj ::get-author)
+      (update :tf conj
+              ::get-author
+              (fn [env]
+                (let [author (:author env)
+                      books (db/find-books-by-author (:id author))
+                      book-summaries (mapv #(select-keys % [:id :title :published :genres :price]) books)]
+                  (update env :res assoc
+                          :body (assoc author :books book-summaries)))))))
 
-(defn create-author
-  "POST /api/authors — create a new author record."
-  [env]
-  (let [params (:body-params env)
-        id (db/next-id)
-        author (assoc params :id id)]
-    (swap! db/authors assoc id author)
-    {:status 201
-     :headers {"Location" (str "/api/authors/" id)}
-     :body author}))
+(def create-author
+  (-> t/transformer
+      (update :id conj ::create-author)
+      (update :tf conj
+              ::create-author
+              (fn [env]
+                (let [params (:body-params env)
+                      id (db/next-id)
+                      author (assoc params :id id)]
+                  (swap! db/authors assoc id author)
+                  (update env :res assoc
+                          :status 201
+                          :headers {"Location" (str "/api/authors/" id)}
+                          :body author))))))
 
-(defn update-author
-  "PUT /api/authors/:id — update author info."
-  [env]
-  (let [author (:author env)
-        params (:body-params env)
-        updated (merge author params {:id (:id author)})]
-    (swap! db/authors assoc (:id author) updated)
-    {:status 200
-     :headers {}
-     :body updated}))
+(def update-author
+  (-> t/transformer
+      (update :id conj ::update-author)
+      (update :tf conj
+              ::update-author
+              (fn [env]
+                (let [author (:author env)
+                      params (:body-params env)
+                      updated (merge author params {:id (:id author)})]
+                  (swap! db/authors assoc (:id author) updated)
+                  (update env :res assoc :body updated))))))
 
-(defn delete-author
-  "DELETE /api/authors/:id — delete an author (and optionally their books)."
-  [env]
-  (let [author (:author env)
-        books (db/find-books-by-author (:id author))]
-    (swap! db/authors dissoc (:id author))
-    ;; Remove orphaned books
-    (doseq [b books]
-      (swap! db/books dissoc (:id b)))
-    {:status 200
-     :headers {}
-     :body {:message (str "Deleted " (:name author) " and " (count books) " books")}}))
+(def delete-author
+  (-> t/transformer
+      (update :id conj ::delete-author)
+      (update :tf conj
+              ::delete-author
+              (fn [env]
+                (let [author (:author env)
+                      books (db/find-books-by-author (:id author))]
+                  (swap! db/authors dissoc (:id author))
+                  (doseq [b books]
+                    (swap! db/books dissoc (:id b)))
+                  (update env :res assoc
+                          :body {:message (str "Deleted " (:name author) " and " (count books) " books")}))))))
 
-(defn author-books
-  "GET /api/authors/:id/books — list books by a specific author."
-  [env]
-  (let [author (:author env)
-        books (db/find-books-by-author (:id author))
-        sorted (sort-by :published books)]
-    {:status 200
-     :headers {}
-     :body {:author (select-keys author [:id :name])
-            :books (vec sorted)
-            :count (count books)}}))
+(def author-books
+  (-> t/transformer
+      (update :id conj ::author-books)
+      (update :tf conj
+              ::author-books
+              (fn [env]
+                (let [author (:author env)
+                      books (db/find-books-by-author (:id author))
+                      sorted (sort-by :published books)]
+                  (update env :res assoc
+                          :body {:author (select-keys author [:id :name])
+                                 :books (vec sorted)
+                                 :count (count books)}))))))

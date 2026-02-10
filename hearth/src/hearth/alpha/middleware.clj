@@ -13,6 +13,20 @@
 ;; Each middleware adds steps to :tf (env transforms), :out (response transforms),
 ;; or :tf-end (final env transforms) pipelines.
 
+;; --- Default Response ---
+
+(def default-response
+  "Transformer that initializes :res with a default 200 response.
+   Compose this before handler transformers so they can (update env :res assoc :body ...)."
+  (-> t/transformer
+      (update :id conj ::default-response)
+      (update :tf conj
+              ::default-response
+              (fn [env]
+                (if (:res env)
+                  env
+                  (assoc env :res {:status 200 :headers {}}))))))
+
 ;; --- Query Params ---
 
 (defn- parse-query-string

@@ -118,5 +118,6 @@
               (fn [env]
                 (if (ws/upgrade-request? env)
                   (let [resp (handler-fn env)]
-                    (assoc env :res resp))
+                    ;; Mark as complete (:body key) so res-aware-tform short-circuits
+                    (assoc env :res (assoc resp :body nil)))
                   env)))))
