@@ -13,9 +13,13 @@
 ;;   - plain functions: (fn [env] -> response-map)
 ;;   - transformers: (-> t/transformer ... (update :tf conj ...))
 ;;
-;; Transformer handlers get the request env merged in and are invoked
+;; Transformer handlers get request data on :ctx and are invoked
 ;; directly. Their :tf steps update :res on the env. This allows
 ;; adding middleware to handlers after definition.
+;;
+;; Plain fn handlers get request data at the top level (no :ctx).
+;; Middleware on plain fn routes writes to top-level keys so
+;; handlers can read :query-params, :body-params, etc. directly.
 
 (defn- extract-path-params
   "Extract path parameter names from a path pattern like '/items/:id'."
@@ -103,8 +107,9 @@
    The router uses :env-op to dispatch to the matched route's handler.
 
    Handlers can be plain functions (fn [env] -> response) or transformers.
-   Transformer handlers get the request env merged in and are invoked directly,
-   allowing middleware to be composed onto handlers after definition."
+   Transformer handlers get request data on :ctx and are invoked directly,
+   allowing middleware to be composed onto handlers after definition.
+   Plain fn handlers get data at top-level for backward compatibility."
   [route-defs]
   (let [routes (expand-routes route-defs)]
     (-> t/transformer
@@ -129,16 +134,16 @@
                                                   :server-port :remote-addr :path-params-values
                                                   :route-name])]
                        (cond
-                         ;; Transformer handler: merge request data in, compose :with, invoke
+                         ;; Transformer handler: put request data on :ctx, invoke
                          (transformer-handler? handler)
-                         (let [handler-tf (-> handler
-                                             (merge req-keys)
-                                             ;; Propagate any env keys set by global middleware
-                                             (merge (select-keys handler-env
-                                                                 [:current-user :auth-method :api-key-scope
-                                                                  :session :query-params :body-params
-                                                                  :form-params :csrf-token :pagination
-                                                                  :request-id :multipart-params]))
+                         (let [ctx (merge req-keys
+                                         (select-keys handler-env
+                                                      [:current-user :auth-method :api-key-scope
+                                                       :session :query-params :body-params
+                                                       :form-params :csrf-token :pagination
+                                                       :request-id :multipart-params]))
+                               handler-tf (-> handler
+                                             (assoc :ctx ctx)
                                              (assoc ::r/tform pipeline/res-aware-tform
                                                     :env-op pipeline/handler-env-op)
                                              ;; Prepend default-response so :res is initialized
@@ -150,6 +155,8 @@
                            (handler-tf))
 
                          ;; Plain fn handler with :with middleware
+                         ;; No :ctx — middleware writes to top-level so plain fns
+                         ;; can read :query-params, :body-params, etc. directly
                          (seq route-with)
                          (let [mw-tf (-> t/transformer
                                          (merge req-keys)

@@ -29,7 +29,7 @@
    ["/" :get pages/home-page
     :route-name ::home]
 
-   ["/health" :get pages/health
+   ["/health" :get pages/health-check
     :route-name ::health]
 
    ["/api" :get pages/api-info
@@ -66,7 +66,7 @@
 
    ;; === Book reviews (nested under books) ===
 
-   ["/api/books/:id/reviews" :get reviews/list-reviews
+   ["/api/books/:id/reviews" :get reviews/list-book-reviews
     :route-name ::book-reviews]
 
    ["/api/books/:id/reviews" :post reviews/create-review
@@ -105,20 +105,17 @@
 
    ;; === Users ===
 
-   ["/api/users" :get users/list-users
-    :route-name ::list-users]
-
-   ["/api/users/:id" :get users/get-user
+   ["/api/users/:id" :get users/get-user-profile
     :route-name ::get-user]
 
-   ["/api/users/:id/reviews" :get reviews/user-reviews
+   ["/api/users/:id/reviews" :get users/user-reviews
     :route-name ::user-reviews]
 
-   ["/api/profile" :get users/get-profile
-    :route-name ::get-profile]
+   ["/api/users/:id/reading-lists" :get users/user-reading-lists
+    :route-name ::user-reading-lists]
 
-   ["/api/profile" :put users/update-profile
-    :route-name ::update-profile]
+   ["/api/users/:id" :put users/update-user-profile
+    :route-name ::update-user-profile]
 
    ;; === Auth ===
 
@@ -136,7 +133,7 @@
 
    ;; === Reading Lists ===
 
-   ["/api/reading-lists" :get rl/list-public-lists
+   ["/api/reading-lists" :get rl/list-public-reading-lists
     :route-name ::list-reading-lists]
 
    ["/api/reading-lists/:id" :get rl/get-reading-list
@@ -159,23 +156,20 @@
 
    ;; === Admin ===
 
-   ["/api/admin/dashboard" :get admin/dashboard
-    :route-name ::admin-dashboard]
+   ["/api/admin/stats" :get admin/stats
+    :route-name ::admin-stats]
 
-   ["/api/admin/export/catalog" :get admin/export-catalog
-    :route-name ::export-catalog]
+   ["/api/admin/export/books" :get admin/export-books
+    :route-name ::export-books]
 
-   ["/api/admin/export/users" :get admin/export-users
-    :route-name ::export-users]
+   ["/api/admin/notifications" :get admin/notifications
+    :route-name ::admin-notifications]
 
-   ["/api/admin/bulk/prices" :post admin/bulk-update-prices
-    :route-name ::bulk-prices]
+   ["/api/admin/seed" :post admin/seed-data
+    :route-name ::admin-seed]
 
-   ["/api/admin/request-log" :get admin/request-log
-    :route-name ::request-log]
-
-   ["/api/admin/request-log" :delete admin/clear-request-log
-    :route-name ::clear-request-log]
+   ["/api/admin/bulk/delete-reviews" :post admin/bulk-delete-reviews
+    :route-name ::bulk-delete-reviews]
 
    ;; === Real-time (SSE + WebSocket) ===
 

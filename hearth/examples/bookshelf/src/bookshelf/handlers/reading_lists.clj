@@ -1,6 +1,7 @@
 (ns bookshelf.handlers.reading-lists
   "Reading list handlers — curated book lists per user.
-   All handlers extend the reading-lists-ns base transformer."
+   All handlers extend the reading-lists-ns base transformer.
+   All request data lives on :ctx."
   (:require
    [bookshelf.db :as db]
    [bookshelf.middleware :as app-mw]
@@ -9,7 +10,7 @@
 
 ;; --- Entity loader ---
 
-(def ^:private load-reading-list
+(def ^:private load-list
   (app-mw/load-entity db/reading-lists :reading-list "Reading list"))
 
 ;; --- Namespace transformer ---
@@ -18,74 +19,70 @@
   "Base transformer for all reading list handlers. JSON response serialization."
   (-> t/transformer
       (update :id conj ::reading-lists)
-      (update :with into [mw/json-body-response])))
+      (update :with conj mw/json-body-response)))
 
 ;; --- Read handlers ---
 
-(def list-public-lists
-  (-> reading-lists-ns
-      (update :id conj ::list-public-lists)
-      (update :with into [mw/query-params mw/keyword-params
-                          (app-mw/pagination-params)])
-      (update :tf conj
-              ::list-public-lists
-              (fn [env]
-                (let [pagination (:pagination env {:page 1 :per-page 10})
-                      lists (->> (vals @db/reading-lists)
-                                 (filter :public?)
-                                 (map (fn [rl]
-                                        (let [user (get @db/users (:user-id rl))]
-                                          (assoc rl :username (:username user)
-                                                    :book-count (count (:book-ids rl))))))
-                                 (sort-by :created-at)
-                                 reverse)
-                      result (db/paginate lists pagination)]
-                  (update env :res assoc :body result))))))
-
 (def get-reading-list
   (-> reading-lists-ns
+      (assoc :doc "Get a reading list by ID with expanded book details. 404 if private and not owner.")
       (update :id conj ::get-reading-list)
-      (update :with into [mw/cookies (mw/session)
-                          app-mw/authenticate
-                          load-reading-list])
+      (update :with conj load-list
+              app-mw/authenticate)
       (update :tf conj
               ::get-reading-list
               (fn [env]
-                (let [rl (:reading-list env)
-                      user (get @db/users (:user-id rl))
-                      current-user (:current-user env)]
+                (let [ctx (:ctx env)
+                      rl (:reading-list ctx)
+                      viewer (:current-user ctx)]
                   (if (and (not (:public? rl))
-                           (or (nil? current-user)
-                               (not= (:id current-user) (:user-id rl))))
+                           (or (nil? viewer) (not= (:id viewer) (:user-id rl))))
                     (update env :res assoc
                             :status 404
                             :body {:error "Reading list not found"})
-                    (let [books (mapv (fn [bid]
-                                        (when-let [b (get @db/books bid)]
-                                          (select-keys b [:id :title :author-id :price :genres])))
-                                      (:book-ids rl))
-                          books (filterv some? books)]
+                    (let [books (mapv #(get @db/books %) (:book-ids rl))
+                          owner (get @db/users (:user-id rl))]
                       (update env :res assoc
-                              :body (assoc rl :username (:username user)
-                                              :books books)))))))))
+                              :body (assoc rl
+                                           :books (filterv some? books)
+                                           :owner (:username owner))))))))))
 
-;; --- Write handlers (require auth) ---
+(def list-public-reading-lists
+  (-> reading-lists-ns
+      (assoc :doc "List all public reading lists with owner usernames.")
+      (update :id conj ::list-public-reading-lists)
+      (update :with conj (app-mw/cache-control "public, max-age=120"))
+      (update :tf conj
+              ::list-public-reading-lists
+              (fn [env]
+                (let [lists (->> (vals @db/reading-lists)
+                                 (filter :public?)
+                                 (mapv (fn [rl]
+                                         (let [owner (get @db/users (:user-id rl))]
+                                           (assoc rl
+                                                  :owner (:username owner)
+                                                  :book-count (count (:book-ids rl)))))))]
+                  (update env :res assoc :body lists))))))
+
+;; --- Write handlers ---
 
 (def create-reading-list
   (-> reading-lists-ns
+      (assoc :doc "Create a new reading list. Requires authentication. Returns 201.")
       (update :id conj ::create-reading-list)
-      (update :with into [mw/body-params mw/keyword-params
-                          app-mw/authenticate app-mw/require-auth])
+      (update :with conj mw/body-params mw/keyword-params
+              app-mw/authenticate app-mw/require-auth)
       (update :tf conj
               ::create-reading-list
               (fn [env]
-                (let [user (:current-user env)
-                      params (:body-params env)
+                (let [ctx (:ctx env)
+                      user (:current-user ctx)
+                      params (:body-params ctx)
                       id (db/next-id)
                       rl {:id id
                           :user-id (:id user)
-                          :name (:name params "Untitled")
-                          :public? (boolean (:public params false))
+                          :name (or (:name params) "Untitled")
+                          :public? (boolean (:public params true))
                           :book-ids (vec (or (:book-ids params) []))
                           :created-at (str (java.time.Instant/now))}]
                   (swap! db/reading-lists assoc id rl)
@@ -96,61 +93,70 @@
 
 (def update-reading-list
   (-> reading-lists-ns
+      (assoc :doc "Update a reading list. Must be the owner.")
       (update :id conj ::update-reading-list)
-      (update :with into [mw/body-params mw/keyword-params
-                          app-mw/authenticate app-mw/require-auth
-                          load-reading-list])
+      (update :with conj mw/body-params mw/keyword-params
+              app-mw/authenticate app-mw/require-auth
+              load-list)
       (update :tf conj
               ::update-reading-list
               (fn [env]
-                (let [rl (:reading-list env)
-                      user (:current-user env)
-                      params (:body-params env)]
-                  (if (not= (:id user) (:user-id rl))
+                (let [ctx (:ctx env)
+                      rl (:reading-list ctx)
+                      user (:current-user ctx)
+                      params (:body-params ctx)]
+                  (if (not= (:user-id rl) (:id user))
                     (update env :res assoc
                             :status 403
-                            :body {:error "You can only edit your own reading lists"})
-                    (let [updated (merge rl (select-keys params [:name :public? :book-ids]))]
+                            :body {:error "Cannot modify another user's reading list"})
+                    (let [updated (merge rl (select-keys params [:name :public :book-ids])
+                                         {:public? (boolean (get params :public (:public? rl)))})]
                       (swap! db/reading-lists assoc (:id rl) updated)
                       (update env :res assoc :body updated))))))))
 
 (def delete-reading-list
   (-> reading-lists-ns
+      (assoc :doc "Delete a reading list. Must be the owner or admin.")
       (update :id conj ::delete-reading-list)
-      (update :with into [app-mw/authenticate app-mw/require-auth
-                          load-reading-list])
+      (update :with conj app-mw/authenticate app-mw/require-auth
+              load-list)
       (update :tf conj
               ::delete-reading-list
               (fn [env]
-                (let [rl (:reading-list env)
-                      user (:current-user env)]
-                  (if (and (not= (:id user) (:user-id rl))
+                (let [ctx (:ctx env)
+                      rl (:reading-list ctx)
+                      user (:current-user ctx)]
+                  (if (and (not= (:user-id rl) (:id user))
                            (not= :admin (:role user)))
                     (update env :res assoc
                             :status 403
-                            :body {:error "Insufficient permissions"})
-                    (do (swap! db/reading-lists dissoc (:id rl))
-                        (update env :res assoc
-                                :body {:message "Reading list deleted" :id (:id rl)}))))))))
+                            :body {:error "Cannot delete another user's reading list"})
+                    (do
+                      (swap! db/reading-lists dissoc (:id rl))
+                      (update env :res assoc
+                              :body {:message "Reading list deleted"
+                                     :id (:id rl)}))))))))
 
 (def add-book-to-list
   (-> reading-lists-ns
+      (assoc :doc "Add a book to a reading list. Must be the owner. Returns 409 if already in list.")
       (update :id conj ::add-book-to-list)
-      (update :with into [mw/body-params mw/keyword-params
-                          app-mw/authenticate app-mw/require-auth
-                          load-reading-list])
+      (update :with conj mw/body-params mw/keyword-params
+              app-mw/authenticate app-mw/require-auth
+              load-list)
       (update :tf conj
               ::add-book-to-list
               (fn [env]
-                (let [rl (:reading-list env)
-                      user (:current-user env)
-                      params (:body-params env)
+                (let [ctx (:ctx env)
+                      rl (:reading-list ctx)
+                      user (:current-user ctx)
+                      params (:body-params ctx)
                       book-id (:book-id params)]
                   (cond
-                    (not= (:id user) (:user-id rl))
+                    (not= (:user-id rl) (:id user))
                     (update env :res assoc
                             :status 403
-                            :body {:error "You can only modify your own reading lists"})
+                            :body {:error "Cannot modify another user's reading list"})
 
                     (nil? (get @db/books book-id))
                     (update env :res assoc
@@ -169,20 +175,24 @@
 
 (def remove-book-from-list
   (-> reading-lists-ns
+      (assoc :doc "Remove a book from a reading list by book-id path param. Must be the owner.")
       (update :id conj ::remove-book-from-list)
-      (update :with into [app-mw/authenticate app-mw/require-auth
-                          load-reading-list])
+      (update :with conj app-mw/authenticate app-mw/require-auth
+              load-list)
       (update :tf conj
               ::remove-book-from-list
               (fn [env]
-                (let [rl (:reading-list env)
-                      user (:current-user env)
-                      book-id-str (get-in env [:path-params-values "book_id"])
-                      book-id (when book-id-str (Integer/parseInt book-id-str))]
-                  (if (not= (:id user) (:user-id rl))
+                (let [ctx (:ctx env)
+                      rl (:reading-list ctx)
+                      user (:current-user ctx)
+                      book-id-str (get-in ctx [:path-params-values "book-id"])
+                      book-id (when book-id-str
+                                (try (Integer/parseInt book-id-str)
+                                     (catch Exception _ nil)))]
+                  (if (not= (:user-id rl) (:id user))
                     (update env :res assoc
                             :status 403
-                            :body {:error "You can only modify your own reading lists"})
+                            :body {:error "Cannot modify another user's reading list"})
                     (let [updated (update rl :book-ids #(vec (remove #{book-id} %)))]
                       (swap! db/reading-lists assoc (:id rl) updated)
                       (update env :res assoc :body updated))))))))

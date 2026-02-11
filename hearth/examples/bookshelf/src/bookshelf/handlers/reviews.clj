@@ -1,7 +1,8 @@
 (ns bookshelf.handlers.reviews
   "Review resource handlers — users can review books.
    All handlers extend the reviews-ns base transformer.
-   Handlers nested under books include their own load-book middleware."
+   Handlers nested under books include their own load-book middleware.
+   All request data lives on :ctx."
   (:require
    [bookshelf.db :as db]
    [bookshelf.middleware :as app-mw]
@@ -16,53 +17,65 @@
 (def ^:private load-review
   (app-mw/load-entity db/reviews :review "Review"))
 
-(def ^:private load-target-user
-  (app-mw/load-entity db/users :target-user "User"))
-
 ;; --- Namespace transformer ---
 
 (def reviews-ns
   "Base transformer for all review handlers. JSON response serialization."
   (-> t/transformer
       (update :id conj ::reviews)
-      (update :with into [mw/json-body-response])))
+      (update :with conj mw/json-body-response)))
 
-;; --- Book-nested review handlers ---
+;; --- Read handlers ---
 
-(def list-reviews
+(def list-book-reviews
   (-> reviews-ns
-      (update :id conj ::list-reviews)
-      (update :with conj load-book)
+      (assoc :doc "List all reviews for a specific book, with reviewer usernames.")
+      (update :id conj ::list-book-reviews)
+      (update :with conj load-book
+              (app-mw/cache-control "public, max-age=120"))
       (update :tf conj
-              ::list-reviews
+              ::list-book-reviews
               (fn [env]
-                (let [book (:book env)
+                (let [book (get-in env [:ctx :book])
                       reviews (db/find-reviews-for-book (:id book))
                       enriched (mapv (fn [r]
                                        (let [user (get @db/users (:user-id r))]
                                          (assoc r :username (:username user))))
                                      reviews)]
+                  (update env :res assoc :body enriched))))))
+
+(def get-review
+  (-> reviews-ns
+      (assoc :doc "Get a single review by ID with reviewer and book info.")
+      (update :id conj ::get-review)
+      (update :with conj load-review)
+      (update :tf conj
+              ::get-review
+              (fn [env]
+                (let [review (get-in env [:ctx :review])
+                      user (get @db/users (:user-id review))
+                      book (get @db/books (:book-id review))]
                   (update env :res assoc
-                          :body {:book-id (:id book)
-                                 :book-title (:title book)
-                                 :reviews enriched
-                                 :count (count enriched)
-                                 :average-rating (when (seq reviews)
-                                                   (/ (reduce + (map :rating reviews))
-                                                      (double (count reviews))))}))))))
+                          :body (assoc review
+                                       :username (:username user)
+                                       :book-title (:title book))))))))
+
+;; --- Write handlers ---
 
 (def create-review
   (-> reviews-ns
+      (assoc :doc "Create a review for a book. One review per user per book. Returns 201.")
       (update :id conj ::create-review)
-      (update :with into [load-book
-                          mw/body-params mw/keyword-params
-                          app-mw/authenticate app-mw/require-auth])
+      (update :with conj mw/body-params mw/keyword-params
+              app-mw/authenticate app-mw/require-auth
+              load-book)
       (update :tf conj
               ::create-review
               (fn [env]
-                (let [book (:book env)
-                      user (:current-user env)
-                      params (:body-params env)
+                (let [ctx (:ctx env)
+                      book (:book ctx)
+                      user (:current-user ctx)
+                      params (:body-params ctx)
                       existing (first (filter #(and (= (:book-id %) (:id book))
                                                     (= (:user-id %) (:id user)))
                                               (vals @db/reviews)))]
@@ -75,95 +88,56 @@
                           review {:id id
                                   :book-id (:id book)
                                   :user-id (:id user)
-                                  :rating (min 5 (max 1 (or (:rating params) 3)))
+                                  :rating (or (:rating params) 3)
                                   :title (:title params "")
                                   :body (:body params "")
                                   :created-at (str (java.time.Instant/now))}]
                       (swap! db/reviews assoc id review)
-                      (db/add-notification! {:type :new-review
-                                             :book-id (:id book)
-                                             :review-id id
-                                             :by (:username user)})
                       (update env :res assoc
                               :status 201
-                              :headers {"Location" (str "/api/reviews/" id)}
                               :body (assoc review :username (:username user))))))))))
-
-;; --- Direct review handlers ---
-
-(def get-review
-  (-> reviews-ns
-      (update :id conj ::get-review)
-      (update :with conj load-review)
-      (update :tf conj
-              ::get-review
-              (fn [env]
-                (let [review (:review env)
-                      user (get @db/users (:user-id review))
-                      book (get @db/books (:book-id review))]
-                  (update env :res assoc
-                          :body (assoc review
-                                       :username (:username user)
-                                       :book-title (:title book))))))))
 
 (def update-review
   (-> reviews-ns
+      (assoc :doc "Update own review by ID. Cannot update other users' reviews.")
       (update :id conj ::update-review)
-      (update :with into [mw/body-params mw/keyword-params
-                          app-mw/authenticate app-mw/require-auth
-                          load-review])
+      (update :with conj mw/body-params mw/keyword-params
+              app-mw/authenticate app-mw/require-auth
+              load-review)
       (update :tf conj
               ::update-review
               (fn [env]
-                (let [review (:review env)
-                      user (:current-user env)
-                      params (:body-params env)]
-                  (if (not= (:id user) (:user-id review))
+                (let [ctx (:ctx env)
+                      review (:review ctx)
+                      user (:current-user ctx)
+                      params (:body-params ctx)]
+                  (if (not= (:user-id review) (:id user))
                     (update env :res assoc
                             :status 403
-                            :body {:error "You can only edit your own reviews"})
-                    (let [updated (merge review
-                                         (select-keys params [:rating :title :body])
-                                         {:updated-at (str (java.time.Instant/now))})]
+                            :body {:error "Cannot edit another user's review"})
+                    (let [updated (merge review (select-keys params [:rating :title :body]))]
                       (swap! db/reviews assoc (:id review) updated)
                       (update env :res assoc :body updated))))))))
 
 (def delete-review
   (-> reviews-ns
+      (assoc :doc "Delete own review by ID. Admins can delete any review.")
       (update :id conj ::delete-review)
-      (update :with into [app-mw/authenticate app-mw/require-auth
-                          load-review])
+      (update :with conj app-mw/authenticate app-mw/require-auth
+              load-review)
       (update :tf conj
               ::delete-review
               (fn [env]
-                (let [review (:review env)
-                      user (:current-user env)]
-                  (if (and (not= (:id user) (:user-id review))
-                           (not (#{:admin :moderator} (:role user))))
+                (let [ctx (:ctx env)
+                      review (:review ctx)
+                      user (:current-user ctx)]
+                  (if (and (not= (:user-id review) (:id user))
+                           (not= :admin (:role user)))
                     (update env :res assoc
                             :status 403
-                            :body {:error "Insufficient permissions to delete this review"})
-                    (do (swap! db/reviews dissoc (:id review))
-                        (update env :res assoc
-                                :body {:message "Review deleted" :id (:id review)}))))))))
-
-;; --- User-scoped reviews ---
-
-(def user-reviews
-  (-> reviews-ns
-      (update :id conj ::user-reviews)
-      (update :with conj load-target-user)
-      (update :tf conj
-              ::user-reviews
-              (fn [env]
-                (let [user (:target-user env)
-                      reviews (db/find-reviews-by-user (:id user))
-                      enriched (mapv (fn [r]
-                                       (let [book (get @db/books (:book-id r))]
-                                         (assoc r :book-title (:title book))))
-                                     reviews)]
-                  (update env :res assoc
-                          :body {:user-id (:id user)
-                                 :username (:username user)
-                                 :reviews enriched
-                                 :count (count enriched)}))))))
+                            :body {:error "Cannot delete another user's review"})
+                    (do
+                      (swap! db/reviews dissoc (:id review))
+                      (update env :res assoc
+                              :body {:message "Review deleted"
+                                     :id (:id review)}))))))))

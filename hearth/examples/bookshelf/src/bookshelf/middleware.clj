@@ -1,6 +1,10 @@
 (ns bookshelf.middleware
   "Custom application middleware for the BookShelf API.
-   Demonstrates building domain-specific transformers on top of hearth."
+   Demonstrates building domain-specific transformers on top of hearth.
+
+   All middleware used as :with on handler transformers reads/writes :ctx.
+   Global middleware (request-id, request-logger, rate-limit, cors-preflight)
+   reads top-level env since it runs before the router creates :ctx."
   (:require
    [bookshelf.db :as db]
    [hearth.alpha.middleware :as mw]
@@ -10,21 +14,18 @@
 
 (def authenticate
   (-> t/transformer
-      (assoc :doc "Middleware that checks for a valid session or API key.
-   Sets :current-user on the env. Passes through if no auth present
-   (use `require-auth` to enforce).
-
-   Supports:
-   - Session-based auth (cookie: hearth-session with :user-id in session)
-   - API key auth (Authorization: Bearer bk-live-xxx)")
+      (assoc :doc "Checks for a valid session or API key and sets :current-user on :ctx.
+   Passes through if no auth present (use require-auth to enforce).
+   Supports session-based auth (cookie) and API key auth (Bearer token).")
       (update :id conj ::authenticate)
       (update :tf conj
               ::authenticate
               (fn [env]
-                (let [;; Try session-based auth first
-                      user-id (get-in env [:session :user-id])
+                (let [ctx (:ctx env)
+                      ;; Try session-based auth first
+                      user-id (get-in ctx [:session :user-id])
                       ;; Fall back to API key
-                      auth-header (get-in env [:headers "authorization"])
+                      auth-header (get-in ctx [:headers "authorization"])
                       api-key (when (and auth-header
                                         (clojure.string/starts-with? auth-header "Bearer "))
                                 (subs auth-header 7))
@@ -32,20 +33,22 @@
                       ;; Resolve user
                       resolved-user-id (or user-id (:user-id api-key-data))
                       user (when resolved-user-id (get @db/users resolved-user-id))]
-                  (cond-> env
-                    user (assoc :current-user (dissoc user :password-hash)
-                                :auth-method (if user-id :session :api-key)
-                                :api-key-scope (:scope api-key-data))))))))
+                  (if user
+                    (update env :ctx assoc
+                            :current-user (dissoc user :password-hash)
+                            :auth-method (if user-id :session :api-key)
+                            :api-key-scope (:scope api-key-data))
+                    env))))))
 
 (def require-auth
   (-> t/transformer
-      (assoc :doc "Middleware that rejects unauthenticated requests with 401.
-   Must come after `authenticate` in the middleware chain.")
+      (assoc :doc "Rejects unauthenticated requests with 401.
+   Must come after authenticate in the middleware chain.")
       (update :id conj ::require-auth)
       (update :tf conj
               ::require-auth
               (fn [env]
-                (if (:current-user env)
+                (if (get-in env [:ctx :current-user])
                   env
                   (assoc env :res {:status 401
                                    :headers {}
@@ -53,7 +56,7 @@
 
 (defn require-role
   "Middleware that restricts access to users with specific roles.
-   Must come after `authenticate` in the middleware chain."
+   Must come after authenticate in the middleware chain."
   [& roles]
   (let [allowed (set roles)]
     (-> t/transformer
@@ -62,7 +65,7 @@
         (update :tf conj
                 ::require-role
                 (fn [env]
-                  (let [user-role (get-in env [:current-user :role])]
+                  (let [user-role (get-in env [:ctx :current-user :role])]
                     (if (allowed user-role)
                       env
                       (assoc env :res {:status 403
@@ -75,7 +78,7 @@
 (defonce ^:private rate-limit-store (atom {}))
 
 (defn rate-limit
-  "Middleware that limits requests per IP address.
+  "Middleware that limits requests per IP address. Runs at global level (top-level env).
    Options:
      :max-requests - max requests per window (default 100)
      :window-ms    - window size in ms (default 60000 = 1 min)"
@@ -104,9 +107,9 @@
 (defonce request-log (atom []))
 
 (def request-logger
+  "Logs every request with timing info. Runs at global level (top-level env)."
   (-> t/transformer
-      (assoc :doc "Middleware that logs every request with timing info.
-   Logs are stored in an atom for monitoring/analytics.")
+      (assoc :doc "Logs every request with timing info to an atom for monitoring.")
       (update :id conj ::request-logger)
       (update :tf conj
               ::request-logger-start
@@ -131,13 +134,13 @@
 
 (def require-json
   (-> t/transformer
-      (assoc :doc "Middleware that rejects non-JSON request bodies with 415 Unsupported Media Type.")
+      (assoc :doc "Rejects non-JSON request bodies with 415 Unsupported Media Type.")
       (update :id conj ::require-json)
       (update :tf conj
               ::require-json
               (fn [env]
-                (let [method (:request-method env)
-                      ct (get-in env [:headers "content-type"] "")]
+                (let [method (get-in env [:ctx :request-method])
+                      ct (get-in env [:ctx :headers "content-type"] "")]
                   (if (and (#{:post :put :patch} method)
                            (not (clojure.string/includes? ct "application/json")))
                     (assoc env :res {:status 415
@@ -148,8 +151,8 @@
 ;; --- Pagination middleware ---
 
 (defn pagination-params
-  "Middleware that extracts and validates pagination parameters from query string.
-   Sets :pagination on env with {:page N :per-page N}."
+  "Middleware that extracts and validates pagination from :ctx :query-params.
+   Sets [:ctx :pagination] with {:page N :per-page N}."
   [& [{:keys [default-per-page max-per-page]
        :or {default-per-page 10 max-per-page 100}}]]
   (-> t/transformer
@@ -158,20 +161,21 @@
       (update :tf conj
               ::pagination-params
               (fn [env]
-                (let [params (:query-params env)
+                (let [params (get-in env [:ctx :query-params])
                       page (try (Integer/parseInt (str (get params :page "1")))
                                 (catch Exception _ 1))
                       per-page (try (Integer/parseInt (str (get params :per-page (str default-per-page))))
                                     (catch Exception _ default-per-page))
                       per-page (min per-page max-per-page)]
-                  (assoc env :pagination {:page (max 1 page)
-                                          :per-page per-page}))))))
+                  (assoc-in env [:ctx :pagination] {:page (max 1 page)
+                                                    :per-page per-page}))))))
 
 ;; --- Request ID middleware ---
 
 (def request-id
+  "Assigns a unique ID to each request. Runs at global level (top-level env)."
   (-> t/transformer
-      (assoc :doc "Middleware that assigns a unique ID to each request for tracing.")
+      (assoc :doc "Assigns a unique request ID for tracing.")
       (update :id conj ::request-id)
       (update :tf conj
               ::request-id
@@ -209,7 +213,7 @@
 
 (defn load-entity
   "Middleware that loads an entity by :id path param from the given store.
-   Assocs the entity onto env under the given key. Returns 404 if not found."
+   Assocs the entity onto [:ctx entity-key]. Returns 404 if not found."
   [store entity-key entity-name]
   (-> t/transformer
       (assoc :doc (str "Load " entity-name " by :id path param"))
@@ -217,13 +221,13 @@
       (update :tf conj
               ::load-entity
               (fn [env]
-                (let [id-str (get-in env [:path-params-values "id"])
+                (let [id-str (get-in env [:ctx :path-params-values "id"])
                       id (when id-str
                            (try (Integer/parseInt id-str)
                                 (catch Exception _ nil)))
                       entity (when id (get @store id))]
                   (if entity
-                    (assoc env entity-key entity)
+                    (assoc-in env [:ctx entity-key] entity)
                     (assoc env :res {:status 404
                                      :headers {}
                                      :body {:error (str entity-name " not found")
@@ -232,7 +236,7 @@
 ;; --- CORS preflight middleware ---
 
 (defn cors-preflight
-  "Middleware that handles CORS preflight (OPTIONS) requests immediately."
+  "Handles CORS preflight (OPTIONS) requests. Runs at global level (top-level env)."
   [opts]
   (-> t/transformer
       (assoc :doc "Handles CORS preflight (OPTIONS) requests immediately.")

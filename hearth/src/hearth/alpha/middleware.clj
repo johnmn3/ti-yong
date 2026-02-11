@@ -13,6 +13,45 @@
 ;; Each middleware adds steps to :tf (env transforms), :out (response transforms),
 ;; or :tf-end (final env transforms) pipelines.
 
+;; --- Context helpers ---
+;; When :ctx is present on the env (handler-level pipeline), middleware reads/writes
+;; request context there. When absent (global pipeline), reads/writes top-level.
+
+(defn- ctx-get
+  "Get a key from :ctx if it exists, otherwise from top-level env."
+  [env k]
+  (if (contains? env :ctx)
+    (get (:ctx env) k)
+    (get env k)))
+
+(defn- ctx-assoc
+  "Assoc a key into :ctx if present, otherwise at top-level."
+  [env k v]
+  (if (contains? env :ctx)
+    (assoc-in env [:ctx k] v)
+    (assoc env k v)))
+
+(defn- ctx-get-in
+  "Get-in from :ctx if present, otherwise from top-level."
+  [env ks]
+  (if (contains? env :ctx)
+    (get-in env (into [:ctx] ks))
+    (get-in env ks)))
+
+(defn- ctx-update
+  "Update a key in :ctx if present, otherwise at top-level."
+  [env k f]
+  (if (contains? env :ctx)
+    (update-in env [:ctx k] f)
+    (update env k f)))
+
+(defn- ctx-merge
+  "Merge a map into :ctx if present, otherwise into top-level."
+  [env m]
+  (if (contains? env :ctx)
+    (update env :ctx merge m)
+    (merge env m)))
+
 ;; --- Default Response ---
 
 (def default-response
@@ -39,14 +78,15 @@
          (reduce (fn [m [k v]] (assoc m k (or v ""))) {}))))
 
 (def query-params
-  "Middleware that parses :query-string into :query-params map."
+  "Middleware that parses :query-string into :query-params map.
+   Context-aware: reads/writes :ctx when present (handler-level), top-level otherwise."
   (-> t/transformer
       (update :id conj ::query-params)
       (update :tf conj
               ::query-params
               (fn [env]
-                (assoc env :query-params
-                       (parse-query-string (:query-string env)))))))
+                (ctx-assoc env :query-params
+                           (parse-query-string (ctx-get env :query-string)))))))
 
 ;; --- JSON Body ---
 
@@ -239,14 +279,15 @@
     :else (str "\"" data "\"")))
 
 (def json-body
-  "Middleware that parses JSON body into :json-body when content-type is application/json."
+  "Middleware that parses JSON body into :json-body when content-type is application/json.
+   Context-aware: reads/writes :ctx when present."
   (-> t/transformer
       (update :id conj ::json-body)
       (update :tf conj
               ::json-body
               (fn [env]
-                (if (json-content-type? (:headers env))
-                  (assoc env :json-body (simple-json-parse (:body env)))
+                (if (json-content-type? (ctx-get env :headers))
+                  (ctx-assoc env :json-body (simple-json-parse (ctx-get env :body)))
                   env)))))
 
 (def json-response
@@ -263,15 +304,16 @@
 ;; --- Logging ---
 
 (defn logging
-  "Middleware that logs request/response info to the given atom."
+  "Middleware that logs request/response info to the given atom.
+   Context-aware: reads :ctx when present."
   [log-atom]
   (-> t/transformer
       (update :id conj ::logging)
       (update :tf conj
               ::logging
               (fn [env]
-                (swap! log-atom conj {:method (:request-method env)
-                                      :uri (:uri env)
+                (swap! log-atom conj {:method (ctx-get env :request-method)
+                                      :uri (ctx-get env :uri)
                                       :timestamp (System/currentTimeMillis)})
                 env))))
 
@@ -349,14 +391,15 @@
     (str/includes? ct "application/x-www-form-urlencoded")))
 
 (def form-params
-  "Middleware that parses form-encoded bodies into :form-params."
+  "Middleware that parses form-encoded bodies into :form-params.
+   Context-aware: reads/writes :ctx when present."
   (-> t/transformer
       (update :id conj ::form-params)
       (update :tf conj
               ::form-params
               (fn [env]
-                (if (form-content-type? (:headers env))
-                  (assoc env :form-params (parse-form-body (:body env)))
+                (if (form-content-type? (ctx-get env :headers))
+                  (ctx-assoc env :form-params (parse-form-body (ctx-get env :body)))
                   env)))))
 
 ;; --- Body Params (unified) ---
@@ -371,22 +414,23 @@
 
 (def body-params
   "Middleware that parses body based on content-type into :body-params.
-   Supports JSON and form-encoded bodies."
+   Supports JSON and form-encoded bodies.
+   Context-aware: reads/writes :ctx when present."
   (-> t/transformer
       (update :id conj ::body-params)
       (update :tf conj
               ::body-params
               (fn [env]
-                (let [headers (:headers env)
-                      body (read-body-string (:body env))]
+                (let [headers (ctx-get env :headers)
+                      body (read-body-string (ctx-get env :body))]
                   (cond
                     (and body (json-content-type? headers))
                     (let [parsed (simple-json-parse body)]
-                      (assoc env :body-params parsed :json-params parsed))
+                      (ctx-merge env {:body-params parsed :json-params parsed}))
 
                     (and body (form-content-type? headers))
                     (let [parsed (parse-form-body body)]
-                      (assoc env :body-params parsed :form-params parsed))
+                      (ctx-merge env {:body-params parsed :form-params parsed}))
 
                     :else env))))))
 
@@ -399,21 +443,22 @@
                {} m)))
 
 (def keyword-params
-  "Middleware that keywordizes string keys in :query-params, :body-params, :form-params."
+  "Middleware that keywordizes string keys in :query-params, :body-params, :form-params.
+   Context-aware: reads/writes :ctx when present."
   (-> t/transformer
       (update :id conj ::keyword-params)
       (update :tf conj
               ::keyword-params
               (fn [env]
                 (cond-> env
-                  (:query-params env)
-                  (update :query-params keywordize-keys-shallow)
-                  (:body-params env)
-                  (update :body-params keywordize-keys-shallow)
-                  (:form-params env)
-                  (update :form-params keywordize-keys-shallow)
-                  (:json-params env)
-                  (update :json-params keywordize-keys-shallow))))))
+                  (ctx-get env :query-params)
+                  (ctx-update :query-params keywordize-keys-shallow)
+                  (ctx-get env :body-params)
+                  (ctx-update :body-params keywordize-keys-shallow)
+                  (ctx-get env :form-params)
+                  (ctx-update :form-params keywordize-keys-shallow)
+                  (ctx-get env :json-params)
+                  (ctx-update :json-params keywordize-keys-shallow))))))
 
 ;; --- Content Negotiation ---
 
@@ -445,7 +490,7 @@
       (update :tf conj
               ::content-negotiation-parse
               (fn [env]
-                (let [accept (get-in env [:headers "accept"])
+                (let [accept (get (ctx-get env :headers) "accept")
                       types (parse-accept accept)]
                   (assoc env ::accept-types (or types ["*/*"])))))
       (update :tf-end conj
@@ -550,7 +595,8 @@
 
 (defn method-param
   "Middleware that overrides :request-method from a query/form param.
-   Default param name is '_method'. Only overrides POST requests."
+   Default param name is '_method'. Only overrides POST requests.
+   Context-aware: reads/writes :ctx when present."
   ([] (method-param "_method"))
   ([param-name]
    (-> t/transformer
@@ -558,11 +604,11 @@
        (update :tf conj
                ::method-param
                (fn [env]
-                 (if (= :post (:request-method env))
-                   (let [override (or (get (:query-params env) param-name)
-                                      (get (:form-params env) param-name))]
+                 (if (= :post (ctx-get env :request-method))
+                   (let [override (or (get (ctx-get env :query-params) param-name)
+                                      (get (ctx-get env :form-params) param-name))]
                      (if override
-                       (assoc env :request-method (keyword (str/lower-case override)))
+                       (ctx-assoc env :request-method (keyword (str/lower-case override)))
                        env))
                    env))))))
 
@@ -607,16 +653,17 @@
 
 (def cookies
   "Middleware that parses Cookie header into :cookies map on request,
-   and writes Set-Cookie headers from :cookies on response."
+   and writes Set-Cookie headers from :cookies on response.
+   Context-aware: reads/writes :ctx when present."
   (-> t/transformer
       (update :id conj ::cookies)
       (update :tf conj
               ::cookies-parse
               (fn [env]
-                (let [cookie-header (get-in env [:headers "cookie"])]
+                (let [cookie-header (get (ctx-get env :headers) "cookie")]
                   (if cookie-header
-                    (assoc env :cookies (parse-cookie-header cookie-header))
-                    (assoc env :cookies {})))))
+                    (ctx-assoc env :cookies (parse-cookie-header cookie-header))
+                    (ctx-assoc env :cookies {})))))
       (update :tf-end conj
               ::cookies-write
               (fn [env]
@@ -651,6 +698,7 @@
 
 (defn session
   "Middleware that loads/saves session data from a store.
+   Context-aware: reads/writes :ctx when present.
    Options:
      :store       - ISessionStore impl (default: memory-store)
      :cookie-name - session cookie name (default: 'hearth-session')
@@ -663,19 +711,20 @@
        (update :tf conj
                ::session-load
                (fn [env]
-                 (let [session-id (get-in env [:cookies cookie-name :value])
+                 (let [session-id (get-in (ctx-get env :cookies) [cookie-name :value])
                        session-data (when session-id (read-session store session-id))]
-                   (assoc env :session (or session-data {})
-                              ::session-id session-id
+                   (-> env
+                       (ctx-assoc :session (or session-data {}))
+                       (assoc ::session-id session-id
                               ::session-store store
                               ::session-cookie-name cookie-name
-                              ::session-cookie-attrs cookie-attrs))))
+                              ::session-cookie-attrs cookie-attrs)))))
        (update :tf-end conj
                ::session-save
                (fn [env]
                  (let [res (:res env)
                        session-from-res (when (map? res) (:session res))
-                       session (or session-from-res (:session env))
+                       session (or session-from-res (ctx-get env :session))
                        session-id (or (::session-id env)
                                       (str (java.util.UUID/randomUUID)))
                        s-store (::session-store env store)
@@ -702,6 +751,7 @@
 
 (defn csrf
   "Middleware that validates anti-forgery tokens on state-changing requests.
+   Context-aware: reads/writes :ctx when present.
    Options:
      :read-token     - fn to extract token from request env
      :error-response - response map for failed validation
@@ -709,25 +759,25 @@
   ([] (csrf {}))
   ([{:keys [read-token error-response]
      :or {read-token (fn [env]
-                       (or (get-in env [:form-params "__anti-forgery-token"])
-                           (get-in env [:headers "x-csrf-token"])
-                           (get-in env [:query-params "__anti-forgery-token"])))
+                       (or (ctx-get-in env [:form-params "__anti-forgery-token"])
+                           (get (ctx-get env :headers) "x-csrf-token")
+                           (ctx-get-in env [:query-params "__anti-forgery-token"])))
           error-response {:status 403 :headers {} :body "Forbidden - CSRF token invalid"}}}]
    (-> t/transformer
        (update :id conj ::csrf)
        (update :tf conj
                ::csrf
                (fn [env]
-                 (let [method (:request-method env)]
+                 (let [method (ctx-get env :request-method)]
                    (if (#{:get :head :options} method)
                      ;; Safe methods: generate/attach token
-                     (let [token (or (get-in env [:session :csrf-token])
+                     (let [token (or (ctx-get-in env [:session :csrf-token])
                                      (str (java.util.UUID/randomUUID)))]
                        (-> env
-                           (assoc :csrf-token token)
-                           (assoc-in [:session :csrf-token] token)))
+                           (ctx-assoc :csrf-token token)
+                           (ctx-update :session #(assoc % :csrf-token token))))
                      ;; Unsafe methods: validate token
-                     (let [expected (get-in env [:session :csrf-token])
+                     (let [expected (ctx-get-in env [:session :csrf-token])
                            actual (read-token env)]
                        (if (and expected actual (= expected actual))
                          env
@@ -870,6 +920,7 @@
 
 (defn multipart-params
   "Middleware that parses multipart/form-data request bodies.
+   Context-aware: reads/writes :ctx when present.
    Options:
      :max-size - maximum body size in bytes (default 10MB). Enforced before parsing."
   ([] (multipart-params {}))
@@ -879,10 +930,10 @@
        (update :tf conj
                ::multipart-params
                (fn [env]
-                 (if (multipart-content-type? (:headers env))
-                   (let [ct (get-in env [:headers "content-type"])
+                 (if (multipart-content-type? (ctx-get env :headers))
+                   (let [ct (get (ctx-get env :headers) "content-type")
                          boundary (parse-multipart-boundary ct)
-                         body (:body env)]
+                         body (ctx-get env :body)]
                      (if (and boundary body)
                        (let [^bytes body-bytes (body-to-bytes body)]
                          (if (and max-size body-bytes (> (alength body-bytes) ^long max-size))
@@ -891,7 +942,7 @@
                                             :headers {}
                                             :body "Request Entity Too Large"})
                            (let [parsed (parse-multipart-body body-bytes boundary)]
-                             (assoc env :multipart-params parsed))))
+                             (ctx-assoc env :multipart-params parsed))))
                        env))
                    env))))))
 
@@ -917,29 +968,33 @@
 
 (def nested-params
   "Middleware that nests flat params with bracket notation into nested maps.
-   e.g. user[name]=Alice -> {:user {:name \"Alice\"}}"
+   e.g. user[name]=Alice -> {:user {:name \"Alice\"}}
+   Context-aware: reads/writes :ctx when present."
   (-> t/transformer
       (update :id conj ::nested-params)
       (update :tf conj
               ::nested-params
               (fn [env]
                 (cond-> env
-                  (:query-params env) (update :query-params nest-params)
-                  (:form-params env) (update :form-params nest-params)
-                  (:body-params env) (update :body-params nest-params))))))
+                  (ctx-get env :query-params) (ctx-update :query-params nest-params)
+                  (ctx-get env :form-params) (ctx-update :form-params nest-params)
+                  (ctx-get env :body-params) (ctx-update :body-params nest-params))))))
 
 ;; --- HEAD Method Support ---
 
 (def head-method
   "Middleware that converts HEAD requests to GET, then strips the response body.
-   This allows GET handlers to also serve HEAD requests automatically."
+   This allows GET handlers to also serve HEAD requests automatically.
+   Context-aware: reads/writes :ctx when present."
   (-> t/transformer
       (update :id conj ::head-method)
       (update :tf conj
               ::head-method
               (fn [env]
-                (if (= :head (:request-method env))
-                  (assoc env :request-method :get ::was-head? true)
+                (if (= :head (ctx-get env :request-method))
+                  (-> env
+                      (ctx-assoc :request-method :get)
+                      (assoc ::was-head? true))
                   env)))
       (update :tf-end conj
               ::head-method-strip
@@ -968,7 +1023,8 @@
 
 (def not-modified
   "Middleware that returns 304 Not Modified when appropriate.
-   Supports ETag/If-None-Match and Last-Modified/If-Modified-Since."
+   Supports ETag/If-None-Match and Last-Modified/If-Modified-Since.
+   Context-aware: reads :ctx headers when present."
   (-> t/transformer
       (update :id conj ::not-modified)
       (update :tf-end conj
@@ -976,9 +1032,9 @@
               (fn [env]
                 (let [res (:res env)]
                   (if (and (map? res) (= 200 (:status res)))
-                    (let [req-etag (get-in env [:headers "if-none-match"])
+                    (let [req-etag (get (ctx-get env :headers) "if-none-match")
                           res-etag (get-in res [:headers "ETag"])
-                          req-modified (get-in env [:headers "if-modified-since"])
+                          req-modified (get (ctx-get env :headers) "if-modified-since")
                           res-modified (get-in res [:headers "Last-Modified"])]
                       (if (or (and req-etag res-etag (= req-etag res-etag))
                               (and req-modified res-modified
@@ -1034,7 +1090,7 @@
                 (let [res (:res env)]
                   (if (and res (map? res) (not= 404 (:status res)))
                     env  ;; Non-404 response exists, don't override
-                    (let [path (str prefix (:uri env))
+                    (let [path (str prefix (ctx-get env :uri))
                           safe? (not (str/includes? path ".."))
                           rsrc (when safe? (clojure.java.io/resource path))]
                       (if rsrc
@@ -1059,7 +1115,7 @@
                 (let [res (:res env)]
                   (if (and res (map? res) (not= 404 (:status res)))
                     env
-                    (let [uri (:uri env)
+                    (let [uri (ctx-get env :uri)
                           f (java.io.File. ^String root ^String uri)
                           canonical (.getCanonicalPath f)
                           root-canonical (.getCanonicalPath (java.io.File. ^String root))]
@@ -1099,7 +1155,7 @@
                   (let [res (:res env)]
                     (if (and res (map? res) (not= 404 (:status res)))
                       env
-                      (let [uri (:uri env)
+                      (let [uri (ctx-get env :uri)
                             path (str prefix uri)
                             safe? (not (str/includes? path ".."))]
                         (if-not safe?
@@ -1181,18 +1237,18 @@
        (update :tf conj
                ::transit-body
                (fn [env]
-                 (let [ct (get-in env [:headers "content-type"] "")]
+                 (let [ct (get (ctx-get env :headers) "content-type" "")]
                    (cond
                      (str/includes? ct "transit+json")
-                     (let [body (:body env)]
+                     (let [body (ctx-get env :body)]
                        (if body
-                         (assoc env :body-params (transit-read body :json opts))
+                         (ctx-assoc env :body-params (transit-read body :json opts))
                          env))
 
                      (str/includes? ct "transit+msgpack")
-                     (let [body (:body env)]
+                     (let [body (ctx-get env :body)]
                        (if body
-                         (assoc env :body-params (transit-read body :msgpack opts))
+                         (ctx-assoc env :body-params (transit-read body :msgpack opts))
                          env))
 
                      :else env)))))))

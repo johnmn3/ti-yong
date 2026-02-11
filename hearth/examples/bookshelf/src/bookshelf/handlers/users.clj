@@ -1,6 +1,7 @@
 (ns bookshelf.handlers.users
   "User resource handlers — profiles, reading lists, and user management.
-   All handlers extend the users-ns base transformer."
+   All handlers extend the users-ns base transformer.
+   All request data lives on :ctx."
   (:require
    [bookshelf.db :as db]
    [bookshelf.middleware :as app-mw]
@@ -9,8 +10,8 @@
 
 ;; --- Entity loader ---
 
-(def ^:private load-target-user
-  (app-mw/load-entity db/users :target-user "User"))
+(def ^:private load-user
+  (app-mw/load-entity db/users :user "User"))
 
 ;; --- Namespace transformer ---
 
@@ -18,87 +19,89 @@
   "Base transformer for all user handlers. JSON response serialization."
   (-> t/transformer
       (update :id conj ::users)
-      (update :with into [mw/json-body-response])))
+      (update :with conj mw/json-body-response)))
 
 ;; --- Read handlers ---
 
-(def list-users
+(def get-user-profile
   (-> users-ns
-      (update :id conj ::list-users)
-      (update :with into [mw/query-params mw/keyword-params
-                          app-mw/authenticate app-mw/require-auth
-                          (app-mw/require-role :admin)
-                          (app-mw/pagination-params)])
+      (assoc :doc "Get public user profile by ID with review count and reading list count.")
+      (update :id conj ::get-user-profile)
+      (update :with conj load-user
+              (app-mw/cache-control "public, max-age=120"))
       (update :tf conj
-              ::list-users
+              ::get-user-profile
               (fn [env]
-                (let [pagination (:pagination env {:page 1 :per-page 20})
-                      users-list (->> (vals @db/users)
-                                      (map #(dissoc % :password-hash))
-                                      (sort-by :username))
-                      result (db/paginate users-list pagination)]
-                  (update env :res assoc :body result))))))
-
-(def get-user
-  (-> users-ns
-      (update :id conj ::get-user)
-      (update :with conj load-target-user)
-      (update :tf conj
-              ::get-user
-              (fn [env]
-                (let [user (:target-user env)
+                (let [user (get-in env [:ctx :user])
                       reviews (db/find-reviews-by-user (:id user))
-                      reading-lists (filter :public? (db/find-reading-lists-for-user (:id user)))]
+                      lists (db/find-reading-lists-for-user (:id user))
+                      public-lists (filter :public? lists)]
                   (update env :res assoc
                           :body {:id (:id user)
                                  :username (:username user)
                                  :role (:role user)
                                  :created-at (:created-at user)
                                  :review-count (count reviews)
-                                 :reading-lists (count reading-lists)}))))))
+                                 :public-reading-lists (count public-lists)}))))))
 
-(def get-profile
+(def user-reviews
   (-> users-ns
-      (update :id conj ::get-profile)
-      (update :with into [mw/query-params mw/keyword-params
-                          app-mw/authenticate app-mw/require-auth])
+      (assoc :doc "List all reviews by a specific user, with book titles.")
+      (update :id conj ::user-reviews)
+      (update :with conj load-user)
       (update :tf conj
-              ::get-profile
+              ::user-reviews
               (fn [env]
-                (let [user (:current-user env)
+                (let [user (get-in env [:ctx :user])
                       reviews (db/find-reviews-by-user (:id user))
-                      lists (db/find-reading-lists-for-user (:id user))]
-                  (update env :res assoc
-                          :body {:id (:id user)
-                                 :username (:username user)
-                                 :email (:email user)
-                                 :role (:role user)
-                                 :created-at (:created-at user)
-                                 :review-count (count reviews)
-                                 :reading-lists (mapv #(select-keys % [:id :name :public? :book-ids]) lists)}))))))
+                      enriched (mapv (fn [r]
+                                       (let [book (get @db/books (:book-id r))]
+                                         (assoc r :book-title (:title book))))
+                                     reviews)]
+                  (update env :res assoc :body enriched))))))
+
+(def user-reading-lists
+  (-> users-ns
+      (assoc :doc "List reading lists for a user. Shows only public lists unless the viewer is the owner.")
+      (update :id conj ::user-reading-lists)
+      (update :with conj load-user
+              app-mw/authenticate)
+      (update :tf conj
+              ::user-reading-lists
+              (fn [env]
+                (let [ctx (:ctx env)
+                      user (:user ctx)
+                      viewer (:current-user ctx)
+                      lists (db/find-reading-lists-for-user (:id user))
+                      visible (if (and viewer (= (:id viewer) (:id user)))
+                                lists
+                                (filter :public? lists))]
+                  (update env :res assoc :body (vec visible)))))))
 
 ;; --- Write handlers ---
 
-(def update-profile
+(def update-user-profile
   (-> users-ns
-      (update :id conj ::update-profile)
-      (update :with into [mw/body-params mw/keyword-params
-                          app-mw/authenticate app-mw/require-auth])
+      (assoc :doc "Update own profile. Only email allowed. Must be logged in as the user.")
+      (update :id conj ::update-user-profile)
+      (update :with conj mw/body-params mw/keyword-params
+              app-mw/authenticate app-mw/require-auth
+              load-user)
       (update :tf conj
-              ::update-profile
+              ::update-user-profile
               (fn [env]
-                (let [user (:current-user env)
-                      params (:body-params env)
-                      allowed-keys [:email :username]
-                      updates (select-keys params allowed-keys)
-                      username (:username updates)]
-                  (if (and username
-                           (not= username (:username user))
-                           (db/find-user-by-username username))
+                (let [ctx (:ctx env)
+                      user (:user ctx)
+                      current (:current-user ctx)
+                      params (:body-params ctx)]
+                  (if (and (not= (:id user) (:id current))
+                           (not= :admin (:role current)))
                     (update env :res assoc
-                            :status 409
-                            :body {:error "Username already taken"})
-                    (let [updated (merge (get @db/users (:id user)) updates)]
+                            :status 403
+                            :body {:error "Cannot update another user's profile"})
+                    (let [allowed-keys [:email]
+                          updates (select-keys params allowed-keys)
+                          updated (merge user updates)]
                       (swap! db/users assoc (:id user) updated)
                       (update env :res assoc
                               :body (dissoc updated :password-hash)))))))))

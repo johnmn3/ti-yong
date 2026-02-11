@@ -1,7 +1,8 @@
 (ns bookshelf.handlers.auth
   "Authentication handlers — login, logout, register, whoami.
-   All handlers extend the auth-ns base transformer.
-   Auth handlers manage cookies and sessions."
+   All handlers extend the auth-ns base transformer, which provides
+   JSON response + cookie/session support for all auth endpoints.
+   All request data lives on :ctx."
   (:require
    [bookshelf.db :as db]
    [bookshelf.middleware :as app-mw]
@@ -11,22 +12,24 @@
 ;; --- Namespace transformer ---
 
 (def auth-ns
-  "Base transformer for auth handlers. JSON response + cookie/session support."
+  "Base transformer for auth handlers. JSON response + cookie/session support.
+   Cookies and session are pushed here since every auth handler needs them."
   (-> t/transformer
       (update :id conj ::auth)
-      (update :with into [mw/json-body-response])))
+      (update :with conj mw/json-body-response mw/cookies (mw/session))))
 
 ;; --- Handlers ---
 
 (def login
   (-> auth-ns
+      (assoc :doc "Authenticate user with username/password. Returns session cookie on success.")
       (update :id conj ::login)
-      (update :with into [mw/body-params mw/keyword-params
-                          mw/cookies (mw/session)])
+      (update :with conj mw/body-params mw/keyword-params)
       (update :tf conj
               ::login
               (fn [env]
-                (let [params (:body-params env)
+                (let [ctx (:ctx env)
+                      params (:body-params ctx)
                       username (:username params)
                       password (:password params)
                       user (db/find-user-by-username username)]
@@ -42,8 +45,8 @@
 
 (def logout
   (-> auth-ns
+      (assoc :doc "Clear session and log user out.")
       (update :id conj ::logout)
-      (update :with into [mw/cookies (mw/session)])
       (update :tf conj
               ::logout
               (fn [env]
@@ -53,13 +56,14 @@
 
 (def register
   (-> auth-ns
+      (assoc :doc "Register a new user. Requires username, email, password (min 8 chars). Returns 201.")
       (update :id conj ::register)
-      (update :with into [mw/body-params mw/keyword-params
-                          mw/cookies (mw/session)])
+      (update :with conj mw/body-params mw/keyword-params)
       (update :tf conj
               ::register
               (fn [env]
-                (let [params (:body-params env)
+                (let [ctx (:ctx env)
+                      params (:body-params ctx)
                       {:keys [username email password]} params]
                   (cond
                     (or (nil? username) (nil? email) (nil? password))
@@ -95,16 +99,17 @@
 
 (def whoami
   (-> auth-ns
+      (assoc :doc "Check current authentication status. Returns user info if authenticated.")
       (update :id conj ::whoami)
-      (update :with into [mw/cookies (mw/session)
-                          app-mw/authenticate])
+      (update :with conj app-mw/authenticate)
       (update :tf conj
               ::whoami
               (fn [env]
-                (if-let [user (:current-user env)]
-                  (update env :res assoc
-                          :body {:authenticated true
-                                 :user (select-keys user [:id :username :email :role])
-                                 :auth-method (:auth-method env)})
-                  (update env :res assoc
-                          :body {:authenticated false}))))))
+                (let [ctx (:ctx env)]
+                  (if-let [user (:current-user ctx)]
+                    (update env :res assoc
+                            :body {:authenticated true
+                                   :user (select-keys user [:id :username :email :role])
+                                   :auth-method (:auth-method ctx)})
+                    (update env :res assoc
+                            :body {:authenticated false})))))))
